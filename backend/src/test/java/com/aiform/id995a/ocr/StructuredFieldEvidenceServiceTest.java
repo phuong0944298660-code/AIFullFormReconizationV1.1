@@ -139,6 +139,25 @@ class StructuredFieldEvidenceServiceTest {
         .displayValue()).isEqualTo("未勾选");
   }
 
+  @Test
+  void ignoresNoApplicantInputMarkerWhenBuildingVisibleFieldDetails() throws Exception {
+    StructuredFieldEvidenceService service = new StructuredFieldEvidenceService();
+    JsonNode structuredData = objectMapper.readTree("""
+        {
+          "page_4": {
+            "no_applicant_input": true
+          }
+        }
+        """);
+
+    Map<Integer, List<StructuredFieldDetail>> details = service.buildFieldDetails(
+        structuredData,
+        List.of(new RenderedOcrPage(4, "", 200, 200))
+    );
+
+    assertThat(details.get(4)).isEmpty();
+  }
+
   private RenderedOcrPage renderedPage() throws Exception {
     BufferedImage image = new BufferedImage(200, 200, BufferedImage.TYPE_INT_RGB);
     Graphics2D graphics = image.createGraphics();

@@ -56,6 +56,7 @@ class StructuredExtractionClientTest {
     assertThat(payload.toString()).contains("top-level _confidence object");
     assertThat(payload.toString()).contains("top-level _field_evidence object");
     assertThat(payload.toString()).contains("char_confidences");
+    assertThat(payload.toString()).contains("no_applicant_input");
     assertThat(payload.toString()).contains("such as 有/没有");
     assertThat(payload.toString()).contains("{\\\"pillow\\\":\\\"没有\\\"}");
     assertThat(payload.toString()).contains("Use true/false only for a standalone checkbox");
@@ -119,6 +120,24 @@ class StructuredExtractionClientTest {
 
     assertThat(httpClient.sendCount()).isEqualTo(2);
     assertThat(result.data().at("/page_1/surname_en").asText()).isEqualTo("CHAN");
+  }
+
+  @Test
+  void doesNotRetryWhenModelMarksPageAsHavingNoApplicantInput() throws Exception {
+    StubHttpClient httpClient = new StubHttpClient(jsonResponse("{\"page_1\":{\"no_applicant_input\":true}}"));
+    StructuredExtractionClient client = new StructuredExtractionClient(
+        new LlmProperties(true, "https://apie.zhisuaninfo.com/v1", "test-key", "Qwen3.6-35B-A3B", 4096, 60, 4),
+        httpClient,
+        objectMapper
+    );
+
+    StructuredExtractionResult result = client.extract(
+        "blank-page.pdf",
+        List.of(new RenderedOcrPage(1, new byte[] {1, 2, 3}, "data:image/png;base64,abc123", 1000, 1400))
+    );
+
+    assertThat(httpClient.sendCount()).isEqualTo(1);
+    assertThat(result.data().at("/page_1/no_applicant_input").asBoolean()).isTrue();
   }
 
   @Test
@@ -203,7 +222,9 @@ class StructuredExtractionClientTest {
 
     assertThat(defaultClient.pageConcurrency(1)).isEqualTo(1);
     assertThat(defaultClient.pageConcurrency(2)).isEqualTo(2);
-    assertThat(defaultClient.pageConcurrency(4)).isEqualTo(3);
+    assertThat(defaultClient.pageConcurrency(3)).isEqualTo(3);
+    assertThat(defaultClient.pageConcurrency(4)).isEqualTo(4);
+    assertThat(defaultClient.pageConcurrency(5)).isEqualTo(4);
     assertThat(defaultClient.pageConcurrency(7)).isEqualTo(4);
     assertThat(widerClient.pageConcurrency(12)).isEqualTo(4);
   }

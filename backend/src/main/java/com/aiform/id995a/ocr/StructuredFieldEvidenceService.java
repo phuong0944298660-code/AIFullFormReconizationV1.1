@@ -110,11 +110,16 @@ public class StructuredFieldEvidenceService {
     }
     if (node.isObject()) {
       node.fields().forEachRemaining(entry -> {
-        if (!entry.getKey().startsWith("_")) {
+        if (!entry.getKey().startsWith("_") && !isControlField(entry.getKey())) {
           collectCandidates(entry.getValue(), append(path, entry.getKey()), candidates);
         }
       });
     }
+  }
+
+  private boolean isControlField(String key) {
+    String normalized = key == null ? "" : key.toLowerCase(Locale.ROOT).replaceAll("[_\\s-]+", "");
+    return "noapplicantinput".equals(normalized);
   }
 
   private boolean isLeafValue(JsonNode node) {

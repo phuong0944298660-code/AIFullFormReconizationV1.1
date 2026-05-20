@@ -152,6 +152,19 @@ test('pageStructuredFieldCount counts leaf fields including null values', () => 
   assert.equal(count, 3)
 })
 
+test('no_applicant_input marker is not counted or rendered as a visible field', () => {
+  const response = {
+    structuredData: {
+      page_4: {
+        no_applicant_input: true
+      }
+    }
+  }
+
+  assert.equal(pageStructuredFieldCount(response, 4), 0)
+  assert.deepEqual(structuredFieldRows(response, 4), [])
+})
+
 test('structuredFieldRows flattens page JSON into field extraction rows', () => {
   const rows = structuredFieldRows({
     structuredData: {

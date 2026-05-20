@@ -141,10 +141,16 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
     progressListener.pageStarted(page.page());
     try {
       ExtractionResponse extraction = sendExtractionRequest(buildRequestPayload(filename, List.of(page), false, totalPages));
+      if (isNoApplicantInputPage(extraction.data(), page)) {
+        progressListener.pageCompleted(page.page());
+        return new PageExtraction(page.page(), extraction);
+      }
       if (isEmptyExtraction(extraction.data(), List.of(page))) {
         extraction = sendExtractionRequest(buildRequestPayload(filename, List.of(page), true, totalPages));
       }
-      if (!isEmptyExtraction(extraction.data(), List.of(page)) && hasWeakFieldEvidence(extraction.data(), page)) {
+      if (!isNoApplicantInputPage(extraction.data(), page)
+          && !isEmptyExtraction(extraction.data(), List.of(page))
+          && hasWeakFieldEvidence(extraction.data(), page)) {
         extraction = sendExtractionRequest(buildRequestPayload(filename, List.of(page), true, totalPages));
       }
       if (isEmptyExtraction(extraction.data(), List.of(page))) {
@@ -167,7 +173,7 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
     int natural = switch (pageCount) {
       case 0, 1 -> 1;
       case 2 -> 2;
-      case 3, 4, 5 -> 3;
+      case 3 -> 3;
       default -> 4;
     };
     return Math.max(1, Math.min(configuredMaximum, natural));
@@ -309,6 +315,7 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
     builder.append("- Example: {\"page_2\":{\"present_address\":\"Flat 7\"},\"_field_evidence\":{\"page_2\":{\"present_address\":{\"label\":\"Present address\",\"value_bbox\":{\"x\":0.20,\"y\":0.10,\"width\":0.55,\"height\":0.09}}}}}.\n");
     builder.append("- For filled handwritten, typed, or signature text, include char_confidences only for ambiguous or low-confidence characters: [{char,index,confidence,bbox}], where bbox is normalized inside the field value_bbox. Do not list every character when the value is clear; field value_bbox is enough.\n");
     builder.append("- Each leaf field value must be the applicant-filled value; if a major visible field is blank, use null.\n");
+    builder.append("- If the page has no applicant-filled handwriting, typed values, selected checkboxes, signatures, photos, or other applicant input, return {\"page_N\":{\"no_applicant_input\":true}} for that page. In this case _field_evidence is not required for that page.\n");
     builder.append("- Ignore template instructions, empty borders, empty lines, barcodes, page numbers, and smudges/corrections that are not intended field values.\n");
     builder.append("- For checkbox option groups on the same row or in the same question, such as 有/没有, Yes/No, Male/Female, Married/Single, do not create one boolean field per option. Create one field named by the row/question label and set its value to the selected option text, for example {\"pillow\":\"没有\"}, {\"water_supply\":\"有\"}, {\"sex\":\"Female\"}. Use null only when no option in that group is selected.\n");
     builder.append("- Use true/false only for a standalone checkbox whose field label itself is the option statement, and name that field with checked/is_selected when the value is a checkbox state.\n");
@@ -351,6 +358,9 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
   }
 
   private boolean hasWeakFieldEvidence(JsonNode data, RenderedOcrPage page) {
+    if (isNoApplicantInputPage(data, page)) {
+      return false;
+    }
     String pageKey = "page_" + page.page();
     List<List<String>> filledPaths = new ArrayList<>();
     collectFilledLeafPaths(data.path(pageKey), List.of(), filledPaths);
@@ -362,6 +372,17 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
         .filter(path -> hasEvidenceBbox(evidencePage, path, pageKey))
         .count();
     return fieldsWithBbox == 0;
+  }
+
+  private boolean isNoApplicantInputPage(JsonNode data, RenderedOcrPage page) {
+    if (data == null || data.isMissingNode() || data.isNull()) {
+      return false;
+    }
+    String pageKey = "page_" + page.page();
+    return data.path(pageKey).path("no_applicant_input").asBoolean(false)
+        || data.path(pageKey).path("noApplicantInput").asBoolean(false)
+        || data.path("no_applicant_input").asBoolean(false)
+        || data.path("noApplicantInput").asBoolean(false);
   }
 
   private void collectFilledLeafPaths(JsonNode node, List<String> path, List<List<String>> paths) {

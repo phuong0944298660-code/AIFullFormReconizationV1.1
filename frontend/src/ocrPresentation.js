@@ -186,7 +186,9 @@ function countLeafFields(value) {
     return value.reduce((total, item) => total + countLeafFields(item), 0)
   }
   if (typeof value === 'object') {
-    return Object.values(value).reduce((total, item) => total + countLeafFields(item), 0)
+    return Object.entries(value)
+      .filter(([key]) => !isControlField(key))
+      .reduce((total, [, item]) => total + countLeafFields(item), 0)
   }
   return 1
 }
@@ -206,12 +208,16 @@ function collectFieldRows(value, path, rows, confidenceData) {
   }
   if (value !== null && typeof value === 'object') {
     Object.entries(value).forEach(([key, child]) => {
-      if (key.startsWith('_')) return
+      if (key.startsWith('_') || isControlField(key)) return
       collectFieldRows(child, [...path, key], rows, confidenceData)
     })
     return
   }
   rows.push(toFieldRow(path, value, lookupConfidence(confidenceData, path)))
+}
+
+function isControlField(key) {
+  return String(key || '').toLowerCase().replace(/[_\s-]+/g, '') === 'noapplicantinput'
 }
 
 function isMetadataObject(value) {
