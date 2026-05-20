@@ -1,0 +1,7 @@
+@echo off
+set LLM_ENABLED=true
+set LLM_BASE_URL=https://apie.zhisuaninfo.com/v1
+set LLM_MODEL=Qwen3.6-35B-A3B
+set LLM_MAX_TOKENS=8192
+set LLM_TIMEOUT_SECONDS=180
+set LLM_API_KEY=replace-with-your-key

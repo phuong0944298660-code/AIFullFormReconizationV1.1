@@ -1,0 +1,52 @@
+server:
+  port: ${SERVER_PORT:18081}
+
+spring:
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 30MB
+
+id995a:
+  template-path: ${TEMPLATE_PATH:../official_templates/students/ID995A_来港就读申请表_申请人.pdf}
+  rules-path: ${RULES_PATH:../official_templates/students/ID995A_审核规则.html}
+
+ocr:
+  tesseract:
+    enabled: ${OCR_ENABLED:false}
+    language: ${OCR_LANGUAGE:eng+chi_sim+chi_tra}
+    data-path: ${TESSDATA_PREFIX:}
+  baidu:
+    authorization: ${BAIDU_OCR_AUTHORIZATION:}
+    api-key: ${BAIDU_OCR_API_KEY:}
+    secret-key: ${BAIDU_OCR_SECRET_KEY:}
+    timeout-seconds: ${BAIDU_OCR_TIMEOUT_SECONDS:60}
+    language-type: ${BAIDU_OCR_LANGUAGE_TYPE:CHN_ENG}
+    detect-direction: ${BAIDU_OCR_DETECT_DIRECTION:false}
+    vertexes-location: ${BAIDU_OCR_VERTEXES_LOCATION:false}
+    paragraph: ${BAIDU_OCR_PARAGRAPH:false}
+    probability: ${BAIDU_OCR_PROBABILITY:false}
+    char-probability: ${BAIDU_OCR_CHAR_PROBABILITY:false}
+    multidirectional-recognize: ${BAIDU_OCR_MULTIDIRECTIONAL_RECOGNIZE:false}
+    pdf-dpi: ${BAIDU_OCR_PDF_DPI:160}
+    max-image-long-side: ${OCR_PAGE_MAX_IMAGE_LONG_SIDE:1600}
+
+llm:
+  enabled: ${LLM_ENABLED:true}
+  base-url: ${LLM_BASE_URL:https://apie.zhisuaninfo.com/v1}
+  api-key: ${LLM_API_KEY:}
+  model: ${LLM_MODEL:Qwen3.6-35B-A3B}
+  max-tokens: ${LLM_MAX_TOKENS:8192}
+  timeout-seconds: ${LLM_TIMEOUT_SECONDS:1200}
+  page-concurrency: ${LLM_PAGE_CONCURRENCY:4}
+
+field-ocr:
+  enabled: ${FIELD_OCR_ENABLED:false}
+  base-url: ${FIELD_OCR_BASE_URL:http://127.0.0.1:18092}
+  timeout-seconds: ${FIELD_OCR_TIMEOUT_SECONDS:20}
+
+rag:
+  enabled: ${RAG_ENABLED:false}
+  base-url: ${RAG_BASE_URL:http://127.0.0.1:18090}
+  timeout-seconds: ${RAG_TIMEOUT_SECONDS:30}
+  top-k: ${RAG_TOP_K:8}

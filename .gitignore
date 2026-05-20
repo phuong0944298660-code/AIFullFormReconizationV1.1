@@ -1,0 +1,43 @@
+# Local credentials and environment overrides
+.env
+.env.*
+*.local
+*.local.*
+!*.local.cmd.example
+!.env.example
+baidu-ocr.local.cmd
+llm.local.cmd
+
+# Logs and runtime output
+*.log
+*.out.log
+*.err.log
+backend/*.log
+frontend/*.log
+ocr-service/*.log
+tmp/
+memory/
+.paddlex_cache/
+
+# Build outputs and dependencies
+backend/target/
+frontend/dist/
+frontend/node_modules/
+frontend/.npm-cache/
+ocr-service/**/__pycache__/
+*.pyc
+
+# Local model weights are large and not required for the LLM-only demo.
+models/*
+!models/README.md
+
+# Private/manual test materials
+docs/5.12_full_tests/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# Accidental local Maven cache path created during development
+backend/%MAVEN_HOME%/

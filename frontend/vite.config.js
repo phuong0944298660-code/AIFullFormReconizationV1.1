@@ -1,0 +1,16 @@
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+
+export default defineConfig({
+  plugins: [vue()],
+  server: {
+    host: '127.0.0.1',
+    port: 5184,
+    strictPort: true,
+    hmr: false,
+    proxy: {
+      '/api': 'http://localhost:18081',
+      '/rules': 'http://localhost:18081'
+    }
+  }
+})

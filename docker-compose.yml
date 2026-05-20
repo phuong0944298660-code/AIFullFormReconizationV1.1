@@ -1,0 +1,67 @@
+version: "3.8"
+
+services:
+  ocr-service:
+    build:
+      context: ./ocr-service
+    container_name: llm-field-ocr-sidecar
+    ports:
+      - "18092:18092"
+    volumes:
+      - ./models:/app/models:ro
+    environment:
+      - PP_OCR_REC_MODEL_DIR=/app/models/PP-OCRv5_server_rec_infer
+      - PP_OCR_DEVICE=${PP_OCR_DEVICE:-cpu}
+      - PP_OCR_CPU_THREADS=${PP_OCR_CPU_THREADS:-4}
+      - PADDLE_PDX_CACHE_HOME=/app/.paddlex_cache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:18092/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    container_name: baidu-full-page-ocr-backend
+    ports:
+      - "18081:18081"
+    environment:
+      - SERVER_PORT=18081
+      - BAIDU_OCR_AUTHORIZATION=${BAIDU_OCR_AUTHORIZATION}
+      - BAIDU_OCR_API_KEY=${BAIDU_OCR_API_KEY}
+      - BAIDU_OCR_SECRET_KEY=${BAIDU_OCR_SECRET_KEY}
+      - BAIDU_OCR_TIMEOUT_SECONDS=${BAIDU_OCR_TIMEOUT_SECONDS:-60}
+      - BAIDU_OCR_LANGUAGE_TYPE=${BAIDU_OCR_LANGUAGE_TYPE:-CHN_ENG}
+      - BAIDU_OCR_DETECT_DIRECTION=${BAIDU_OCR_DETECT_DIRECTION:-false}
+      - BAIDU_OCR_VERTEXES_LOCATION=${BAIDU_OCR_VERTEXES_LOCATION:-false}
+      - BAIDU_OCR_PARAGRAPH=${BAIDU_OCR_PARAGRAPH:-false}
+      - BAIDU_OCR_PROBABILITY=${BAIDU_OCR_PROBABILITY:-false}
+      - BAIDU_OCR_CHAR_PROBABILITY=${BAIDU_OCR_CHAR_PROBABILITY:-false}
+      - BAIDU_OCR_MULTIDIRECTIONAL_RECOGNIZE=${BAIDU_OCR_MULTIDIRECTIONAL_RECOGNIZE:-false}
+      - RAG_ENABLED=false
+      - LLM_ENABLED=true
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://apie.zhisuaninfo.com/v1}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-Qwen3.6-35B-A3B}
+      - FIELD_OCR_ENABLED=true
+      - FIELD_OCR_BASE_URL=http://ocr-service:18092
+      - FIELD_OCR_TIMEOUT_SECONDS=${FIELD_OCR_TIMEOUT_SECONDS:-20}
+    depends_on:
+      ocr-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:18081/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: baidu-full-page-ocr-frontend
+    ports:
+      - "5184:80"
+    depends_on:
+      backend:
+        condition: service_healthy

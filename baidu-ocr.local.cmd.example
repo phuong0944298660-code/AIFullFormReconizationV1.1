@@ -1,0 +1,10 @@
+@echo off
+rem Copy this file to baidu-ocr.local.cmd and fill in one credential mode.
+rem Do not commit baidu-ocr.local.cmd.
+
+rem Baidu sample Authorization mode:
+set "BAIDU_OCR_AUTHORIZATION=Bearer your_bce_v3_token"
+
+rem Or OAuth API key and secret mode:
+rem set "BAIDU_OCR_API_KEY=your_api_key"
+rem set "BAIDU_OCR_SECRET_KEY=your_secret_key"
