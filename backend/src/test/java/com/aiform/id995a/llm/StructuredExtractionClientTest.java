@@ -101,6 +101,27 @@ class StructuredExtractionClientTest {
   }
 
   @Test
+  void retriesOnceWhenLlmConnectionClosesBeforeResponseHeaders() throws Exception {
+    StubHttpClient httpClient = new StubHttpClient(List.of(
+        new java.io.IOException("HTTP/1.1 header parser received no bytes"),
+        jsonResponse("{\"page_1\":{\"surname_en\":\"CHAN\"},\"_field_evidence\":{\"page_1\":{\"surname_en\":{\"label\":\"Surname in English\",\"value_bbox\":[10,20,150,40]}}}}")
+    ));
+    StructuredExtractionClient client = new StructuredExtractionClient(
+        new LlmProperties(true, "https://apie.zhisuaninfo.com/v1", "test-key", "Qwen3.6-35B-A3B", 4096, 60, 4),
+        httpClient,
+        objectMapper
+    );
+
+    StructuredExtractionResult result = client.extract(
+        "sample.pdf",
+        List.of(new RenderedOcrPage(1, new byte[] {1, 2, 3}, "data:image/png;base64,abc123", 1000, 1400))
+    );
+
+    assertThat(httpClient.sendCount()).isEqualTo(2);
+    assertThat(result.data().at("/page_1/surname_en").asText()).isEqualTo("CHAN");
+  }
+
+  @Test
   void retriesOnceWhenModelReturnsFieldsWithoutPerFieldEvidence() throws Exception {
     StubHttpClient httpClient = new StubHttpClient(List.of(
         jsonResponse("{\"page_1\":{\"name\":\"Alice Zhang\"},\"_field_evidence\":{\"page_1\":{\"label\":\"Whole page\",\"value_bbox\":[0,0,100,100]}}}"),
@@ -238,15 +259,15 @@ class StructuredExtractionClientTest {
   }
 
   private static final class StubHttpClient extends HttpClient {
-    private final List<String> bodies;
+    private final List<?> outcomes;
     private final AtomicInteger sendCount = new AtomicInteger();
 
     private StubHttpClient(String body) {
       this(List.of(body));
     }
 
-    private StubHttpClient(List<String> bodies) {
-      this.bodies = List.copyOf(bodies);
+    private StubHttpClient(List<?> outcomes) {
+      this.outcomes = List.copyOf(outcomes);
     }
 
     private int sendCount() {
@@ -304,15 +325,24 @@ class StructuredExtractionClientTest {
 
     @Override
     @SuppressWarnings("unchecked")
-    public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
+    public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler)
+        throws java.io.IOException {
       int index = sendCount.getAndIncrement();
-      String body = bodies.get(Math.min(index, bodies.size() - 1));
+      Object outcome = outcomes.get(Math.min(index, outcomes.size() - 1));
+      if (outcome instanceof java.io.IOException exception) {
+        throw exception;
+      }
+      String body = (String) outcome;
       return (HttpResponse<T>) new StubHttpResponse(request, body);
     }
 
     @Override
     public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
-      return CompletableFuture.completedFuture(send(request, responseBodyHandler));
+      try {
+        return CompletableFuture.completedFuture(send(request, responseBodyHandler));
+      } catch (Exception exception) {
+        return CompletableFuture.failedFuture(exception);
+      }
     }
 
     @Override
@@ -321,7 +351,11 @@ class StructuredExtractionClientTest {
         HttpResponse.BodyHandler<T> responseBodyHandler,
         HttpResponse.PushPromiseHandler<T> pushPromiseHandler
     ) {
-      return CompletableFuture.completedFuture(send(request, responseBodyHandler));
+      try {
+        return CompletableFuture.completedFuture(send(request, responseBodyHandler));
+      } catch (Exception exception) {
+        return CompletableFuture.failedFuture(exception);
+      }
     }
   }
 

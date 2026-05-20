@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -226,7 +227,7 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
         .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
         .build();
 
-    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    HttpResponse<String> response = sendWithTransientTransportRetry(request);
     if (response.statusCode() < 200 || response.statusCode() >= 300) {
       throw new IOException("LLM HTTP " + response.statusCode() + ": " + truncate(response.body(), 600));
     }
@@ -234,6 +235,41 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
     String rawText = extractMessageContent(response.body());
     JsonNode data = readModelJson(extractJson(rawText));
     return new ExtractionResponse(data, rawText);
+  }
+
+  private HttpResponse<String> sendWithTransientTransportRetry(HttpRequest request)
+      throws IOException, InterruptedException {
+    int maxAttempts = 2;
+    for (int attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+      } catch (IOException exception) {
+        if (attempt >= maxAttempts || !isTransientTransportFailure(exception)) {
+          throw exception;
+        }
+      }
+    }
+    throw new IOException("LLM request failed.");
+  }
+
+  private boolean isTransientTransportFailure(IOException exception) {
+    Throwable current = exception;
+    while (current != null) {
+      String message = current.getMessage();
+      if (message != null) {
+        String normalized = message.toLowerCase(Locale.ROOT);
+        if (normalized.contains("header parser received no bytes")
+            || normalized.contains("connection reset")
+            || normalized.contains("connection closed")
+            || normalized.contains("closed before")
+            || normalized.contains("unexpected end of")
+            || normalized.contains("eof")) {
+          return true;
+        }
+      }
+      current = current.getCause();
+    }
+    return false;
   }
 
   private JsonNode readModelJson(String json) throws IOException {
