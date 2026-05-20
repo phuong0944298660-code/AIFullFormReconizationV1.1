@@ -46,13 +46,11 @@ export function structuredJsonPreview(response) {
 export function responseJsonPreview(response) {
   if (!response) return ''
   const pages = Array.isArray(response.pages) ? response.pages : []
-  const compact = {
+  const normalized = {
     ...response,
-    pages: pages.map((page) => ({
-      ...page,
-      sourceImageDataUrl: summarizeDataUrl(page.sourceImageDataUrl)
-    }))
+    pages
   }
+  const compact = compactPreviewValue(normalized)
   return JSON.stringify(compact, null, 2)
 }
 
@@ -157,6 +155,26 @@ function hasHeavyReplacementNoise(text) {
 function summarizeDataUrl(value) {
   if (!value) return ''
   if (String(value).startsWith('data:')) return `${String(value).slice(0, 56)}...`
+  return value
+}
+
+function compactPreviewValue(value) {
+  if (typeof value === 'string') return compactPreviewString(value)
+  if (Array.isArray(value)) return value.map(compactPreviewValue)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, compactPreviewValue(item)])
+    )
+  }
+  return value
+}
+
+function compactPreviewString(value) {
+  if (value.startsWith('data:')) return summarizeDataUrl(value)
+  const maxLength = 20000
+  if (value.length > maxLength) {
+    return `${value.slice(0, maxLength)}... [truncated ${value.length - maxLength} chars]`
+  }
   return value
 }
 

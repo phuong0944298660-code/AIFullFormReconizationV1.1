@@ -104,6 +104,33 @@ test('responseJsonPreview tolerates responses without a pages array', () => {
   assert.match(preview, /"pages": \[\]/)
 })
 
+test('responseJsonPreview compacts nested image data urls before rendering JSON tab', () => {
+  const longPageImage = `data:image/png;base64,${'a'.repeat(8000)}`
+  const longCropImage = `data:image/jpeg;base64,${'b'.repeat(8000)}`
+  const preview = responseJsonPreview({
+    filename: 'heavy.pdf',
+    pages: [
+      {
+        page: 1,
+        sourceImageDataUrl: longPageImage,
+        structuredFields: [
+          {
+            path: 'name',
+            value: 'CHAN',
+            snapshotDataUrl: longCropImage
+          }
+        ]
+      }
+    ]
+  })
+
+  assert.equal(preview.includes('a'.repeat(1000)), false)
+  assert.equal(preview.includes('b'.repeat(1000)), false)
+  assert.match(preview, /"sourceImageDataUrl": "data:image\/png;base64,/)
+  assert.match(preview, /"snapshotDataUrl": "data:image\/jpeg;base64,/)
+  assert.ok(preview.length < 2000)
+})
+
 test('pageStructuredFieldCount counts leaf fields including null values', () => {
   const count = pageStructuredFieldCount({
     structuredData: {
