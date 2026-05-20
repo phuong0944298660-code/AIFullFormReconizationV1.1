@@ -245,7 +245,7 @@ function toEvidenceFieldRow(field) {
 
 function displayFieldValue(path, value) {
   if (value === null || value === undefined || value === '') return '未填写'
-  if (typeof value === 'boolean') return value ? '已勾选' : '未勾选'
+  if (typeof value === 'boolean') return isStandaloneCheckboxState(path) ? (value ? '已勾选' : '未勾选') : (value ? '有' : '没有')
   if (isSignaturePath(path) && String(value).trim().toLowerCase() === 'present') {
     return '已签名，未识别出签名文字'
   }
@@ -278,6 +278,11 @@ function humanizeKey(key) {
 
 function isSignaturePath(path) {
   return path.some((part) => /signature|签名|簽名/i.test(String(part)))
+}
+
+function isStandaloneCheckboxState(path) {
+  const text = path.map((part) => String(part || '')).join(' ').toLowerCase()
+  return /checked|checkbox|selected|is selected|勾选|已选/.test(text)
 }
 
 function confidencePageData(response, pageNumber) {

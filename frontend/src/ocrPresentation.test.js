@@ -159,6 +159,28 @@ test('structuredFieldRows flattens page JSON into field extraction rows', () => 
   assert.equal(typeof rows[4].confidence, 'number')
 })
 
+test('structuredFieldRows renders yes-no option booleans as selected option meaning', () => {
+  const rows = structuredFieldRows({
+    structuredData: {
+      page_3: {
+        supplied_facilities: {
+          pillow: false,
+          refrigerator: false,
+          table: false,
+          bed: true,
+          pillow_checked: false
+        }
+      }
+    }
+  }, 3)
+
+  assert.equal(rows.find((row) => row.path === 'supplied_facilities.pillow').displayValue, '没有')
+  assert.equal(rows.find((row) => row.path === 'supplied_facilities.refrigerator').displayValue, '没有')
+  assert.equal(rows.find((row) => row.path === 'supplied_facilities.table').displayValue, '没有')
+  assert.equal(rows.find((row) => row.path === 'supplied_facilities.bed').displayValue, '有')
+  assert.equal(rows.find((row) => row.path === 'supplied_facilities.pillow_checked').displayValue, '未勾选')
+})
+
 test('structuredFieldRows uses backend LLM field evidence with crop snapshots', () => {
   const rows = structuredFieldRows({
     pages: [

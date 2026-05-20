@@ -62,7 +62,7 @@ public class StructuredFieldEvidenceService {
         candidate.path(),
         label(evidence, candidate.path()),
         candidate.value(),
-        displayValue(candidate.path(), candidate.value()),
+        displayValue(candidate.path(), label(evidence, candidate.path()), candidate.value()),
         confidence,
         bbox,
         crop,
@@ -367,12 +367,15 @@ public class StructuredFieldEvidenceService {
     return label.isBlank() ? humanize(path.isEmpty() ? "field" : path.get(path.size() - 1)) : label;
   }
 
-  private String displayValue(List<String> path, JsonNode value) {
+  private String displayValue(List<String> path, String label, JsonNode value) {
     if (value == null || value.isNull() || value.isMissingNode()) {
       return "未填写";
     }
     if (value.isBoolean()) {
-      return value.asBoolean() ? "已勾选" : "未勾选";
+      if (isStandaloneCheckboxState(path, label)) {
+        return value.asBoolean() ? "已勾选" : "未勾选";
+      }
+      return value.asBoolean() ? "有" : "没有";
     }
     String text = value.asText("");
     if (text.isBlank()) {
@@ -385,6 +388,18 @@ public class StructuredFieldEvidenceService {
       return "已签名，未识别出签名文字";
     }
     return text;
+  }
+
+  private boolean isStandaloneCheckboxState(List<String> path, String label) {
+    String joinedPath = String.join(" ", path).toLowerCase(Locale.ROOT);
+    String joinedLabel = label == null ? "" : label.toLowerCase(Locale.ROOT);
+    String text = joinedPath + " " + joinedLabel;
+    return text.contains("checked")
+        || text.contains("checkbox")
+        || text.contains("selected")
+        || text.contains("is_selected")
+        || text.contains("勾选")
+        || text.contains("已选");
   }
 
   private String valueText(JsonNode value) {

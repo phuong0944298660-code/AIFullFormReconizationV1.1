@@ -102,6 +102,43 @@ class StructuredFieldEvidenceServiceTest {
     assertThat(details.get(1).get(0).snapshotDataUrl()).isBlank();
   }
 
+  @Test
+  void rendersYesNoOptionBooleansAsSelectedOptionMeaning() throws Exception {
+    StructuredFieldEvidenceService service = new StructuredFieldEvidenceService();
+    JsonNode structuredData = objectMapper.readTree("""
+        {
+          "page_3": {
+            "supplied_facilities": {
+              "pillow": false,
+              "refrigerator": false,
+              "table": false,
+              "bed": true,
+              "pillow_checked": false
+            }
+          }
+        }
+        """);
+
+    Map<Integer, List<StructuredFieldDetail>> details = service.buildFieldDetails(
+        structuredData,
+        List.of(new RenderedOcrPage(3, "", 200, 200))
+    );
+
+    assertThat(details.get(3))
+        .extracting(StructuredFieldDetail::displayValue)
+        .contains("没有", "有", "未勾选");
+    assertThat(details.get(3).stream()
+        .filter(detail -> detail.path().equals("supplied_facilities.pillow"))
+        .findFirst()
+        .orElseThrow()
+        .displayValue()).isEqualTo("没有");
+    assertThat(details.get(3).stream()
+        .filter(detail -> detail.path().equals("supplied_facilities.pillow_checked"))
+        .findFirst()
+        .orElseThrow()
+        .displayValue()).isEqualTo("未勾选");
+  }
+
   private RenderedOcrPage renderedPage() throws Exception {
     BufferedImage image = new BufferedImage(200, 200, BufferedImage.TYPE_INT_RGB);
     Graphics2D graphics = image.createGraphics();

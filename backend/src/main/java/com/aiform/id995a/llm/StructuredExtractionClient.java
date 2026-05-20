@@ -274,7 +274,8 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
     builder.append("- For filled handwritten, typed, or signature text, include char_confidences only for ambiguous or low-confidence characters: [{char,index,confidence,bbox}], where bbox is normalized inside the field value_bbox. Do not list every character when the value is clear; field value_bbox is enough.\n");
     builder.append("- Each leaf field value must be the applicant-filled value; if a major visible field is blank, use null.\n");
     builder.append("- Ignore template instructions, empty borders, empty lines, barcodes, page numbers, and smudges/corrections that are not intended field values.\n");
-    builder.append("- For checkboxes, return the selected option text or true/false when the label already identifies the option.\n");
+    builder.append("- For checkbox option groups on the same row or in the same question, such as 有/没有, Yes/No, Male/Female, Married/Single, do not create one boolean field per option. Create one field named by the row/question label and set its value to the selected option text, for example {\"pillow\":\"没有\"}, {\"water_supply\":\"有\"}, {\"sex\":\"Female\"}. Use null only when no option in that group is selected.\n");
+    builder.append("- Use true/false only for a standalone checkbox whose field label itself is the option statement, and name that field with checked/is_selected when the value is a checkbox state.\n");
     builder.append("- For signatures, transcribe the visible handwritten signature text as the field value when readable. Do not return present for signatures. If a signature mark exists but the text cannot be read, use \"illegible_signature\"; otherwise use null.\n");
     builder.append("- For photos or pasted image areas, return \"present\" when an actual photo exists; otherwise use null.\n");
     builder.append("- Do not invent fields that are not visible on the page.\n");

@@ -56,6 +56,9 @@ class StructuredExtractionClientTest {
     assertThat(payload.toString()).contains("top-level _confidence object");
     assertThat(payload.toString()).contains("top-level _field_evidence object");
     assertThat(payload.toString()).contains("char_confidences");
+    assertThat(payload.toString()).contains("such as 有/没有");
+    assertThat(payload.toString()).contains("{\\\"pillow\\\":\\\"没有\\\"}");
+    assertThat(payload.toString()).contains("Use true/false only for a standalone checkbox");
   }
 
   @Test
