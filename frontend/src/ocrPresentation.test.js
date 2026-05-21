@@ -349,7 +349,16 @@ test('recognitionProgressState uses backend job progress instead of elapsed-time
     pages: [
       { page: 1, status: 'completed', percent: 100 },
       { page: 2, status: 'completed', percent: 100 },
-      { page: 3, status: 'running', percent: 0, message: '正在识别第 3 页。' },
+      {
+        page: 3,
+        status: 'running',
+        percent: 0,
+        message: '正在识别第 3 页。',
+        attempt: 2,
+        attemptReason: 'empty_retry',
+        elapsedMillis: 84000,
+        currentAttemptMillis: 12200
+      },
       { page: 4, status: 'pending', percent: 0 },
       { page: 5, status: 'pending', percent: 0 }
     ]
@@ -358,17 +367,22 @@ test('recognitionProgressState uses backend job progress instead of elapsed-time
   assert.equal(state.percent, 40)
   assert.equal(state.stage, 'Page 3 识别中')
   assert.match(state.detail, /已完成 2 \/ 5 页/)
+  assert.match(state.detail, /第 2 次请求/)
+  assert.match(state.detail, /总耗时 1分24秒/)
+  assert.match(state.detail, /本次 12秒/)
 })
 
 test('pageProgressItems labels each backend-reported page status', () => {
   const items = pageProgressItems({
     pages: [
-      { page: 1, status: 'completed', percent: 100 },
-      { page: 2, status: 'running', percent: 0 },
+      { page: 1, status: 'completed', percent: 100, elapsedMillis: 1234, attempt: 1 },
+      { page: 2, status: 'running', percent: 0, elapsedMillis: 5200, attempt: 2 },
       { page: 3, status: 'pending', percent: 0 },
       { page: 4, status: 'failed', percent: 100 }
     ]
   })
 
   assert.deepEqual(items.map((item) => item.label), ['已完成', '识别中', '等待', '失败'])
+  assert.equal(items[0].diagnostic, '1次 / 1秒')
+  assert.equal(items[1].diagnostic, '2次 / 5秒')
 })

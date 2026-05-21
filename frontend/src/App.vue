@@ -382,7 +382,7 @@ onBeforeUnmount(() => {
               :title="item.message"
             >
               <strong>Page {{ item.page }}</strong>
-              <small>{{ item.label }}</small>
+              <small>{{ item.label }}<span v-if="item.diagnostic"> · {{ item.diagnostic }}</span></small>
             </span>
           </div>
         </div>

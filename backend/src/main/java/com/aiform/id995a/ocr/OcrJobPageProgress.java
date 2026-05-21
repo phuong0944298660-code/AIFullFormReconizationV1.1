@@ -5,5 +5,10 @@ public record OcrJobPageProgress(
     String status,
     int percent,
     String stage,
-    String message
+    String message,
+    long elapsedMillis,
+    int attempt,
+    String attemptReason,
+    long lastAttemptMillis,
+    long currentAttemptMillis
 ) {}

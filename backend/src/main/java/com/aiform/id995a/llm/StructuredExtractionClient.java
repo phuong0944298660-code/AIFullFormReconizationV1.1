@@ -7,7 +7,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.net.URI;
@@ -140,18 +139,13 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
   ) throws IOException {
     progressListener.pageStarted(page.page());
     try {
-      ExtractionResponse extraction = sendExtractionRequest(buildRequestPayload(filename, List.of(page), false, totalPages));
+      ExtractionResponse extraction = sendPageAttempt(filename, totalPages, page, progressListener, 1, "initial", false);
       if (isNoApplicantInputPage(extraction.data(), page)) {
         progressListener.pageCompleted(page.page());
         return new PageExtraction(page.page(), extraction);
       }
       if (isEmptyExtraction(extraction.data(), List.of(page))) {
-        extraction = sendExtractionRequest(buildRequestPayload(filename, List.of(page), true, totalPages));
-      }
-      if (!isNoApplicantInputPage(extraction.data(), page)
-          && !isEmptyExtraction(extraction.data(), List.of(page))
-          && hasWeakFieldEvidence(extraction.data(), page)) {
-        extraction = sendExtractionRequest(buildRequestPayload(filename, List.of(page), true, totalPages));
+        extraction = sendPageAttempt(filename, totalPages, page, progressListener, 2, "empty_retry", true);
       }
       if (isEmptyExtraction(extraction.data(), List.of(page))) {
         extraction = new ExtractionResponse(objectMapper.createObjectNode(), extraction.rawText());
@@ -164,6 +158,32 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
       throw new IOException("LLM request interrupted.", exception);
     } catch (IOException | RuntimeException exception) {
       progressListener.pageFailed(page.page(), exception.getMessage());
+      throw exception;
+    }
+  }
+
+  private ExtractionResponse sendPageAttempt(
+      String filename,
+      int totalPages,
+      RenderedOcrPage page,
+      ExtractionProgressListener progressListener,
+      int attempt,
+      String reason,
+      boolean retryAfterEmptyResponse
+  ) throws IOException, InterruptedException {
+    long startedAt = System.nanoTime();
+    progressListener.pageAttemptStarted(page.page(), attempt, reason);
+    try {
+      ExtractionResponse response = sendExtractionRequest(
+          buildRequestPayload(filename, List.of(page), retryAfterEmptyResponse, totalPages)
+      );
+      progressListener.pageAttemptCompleted(page.page(), attempt, reason, elapsedMillisSince(startedAt));
+      return response;
+    } catch (InterruptedException exception) {
+      progressListener.pageAttemptFailed(page.page(), attempt, reason, elapsedMillisSince(startedAt), "LLM request interrupted.");
+      throw exception;
+    } catch (IOException | RuntimeException exception) {
+      progressListener.pageAttemptFailed(page.page(), attempt, reason, elapsedMillisSince(startedAt), exception.getMessage());
       throw exception;
     }
   }
@@ -323,7 +343,7 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
     builder.append("- For photos or pasted image areas, return \"present\" when an actual photo exists; otherwise use null.\n");
     builder.append("- Do not invent fields that are not visible on the page.\n");
     if (retryAfterEmptyResponse) {
-      builder.append("The previous response was unusable because it was empty or missing per-field _field_evidence. Re-read the page and return compact visible applicant-fillable field labels and applicant-filled values. For every non-null handwritten, typed, checked, or signature value, add a matching _field_evidence.page_N.<exact_field_path>.value_bbox for that filled area.\n");
+      builder.append("The previous response was unusable because it was empty. Re-read the page and return compact visible applicant-fillable field labels and applicant-filled values. For every non-null handwritten, typed, checked, or signature value, add a matching _field_evidence.page_N.<exact_field_path>.value_bbox for that filled area when it is clear.\n");
     }
     builder.append("source_file: ").append(filename == null || filename.isBlank() ? "uploaded-document" : filename).append('\n');
     builder.append("total_pages: ").append(totalPages).append('\n');
@@ -357,23 +377,6 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
     return true;
   }
 
-  private boolean hasWeakFieldEvidence(JsonNode data, RenderedOcrPage page) {
-    if (isNoApplicantInputPage(data, page)) {
-      return false;
-    }
-    String pageKey = "page_" + page.page();
-    List<List<String>> filledPaths = new ArrayList<>();
-    collectFilledLeafPaths(data.path(pageKey), List.of(), filledPaths);
-    if (filledPaths.isEmpty()) {
-      return false;
-    }
-    JsonNode evidencePage = data.path("_field_evidence").path(pageKey);
-    long fieldsWithBbox = filledPaths.stream()
-        .filter(path -> hasEvidenceBbox(evidencePage, path, pageKey))
-        .count();
-    return fieldsWithBbox == 0;
-  }
-
   private boolean isNoApplicantInputPage(JsonNode data, RenderedOcrPage page) {
     if (data == null || data.isMissingNode() || data.isNull()) {
       return false;
@@ -385,79 +388,8 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
         || data.path("noApplicantInput").asBoolean(false);
   }
 
-  private void collectFilledLeafPaths(JsonNode node, List<String> path, List<List<String>> paths) {
-    if (node == null || node.isMissingNode() || node.isNull()) {
-      return;
-    }
-    if (node.isTextual()) {
-      if (!node.asText("").isBlank()) {
-        paths.add(path);
-      }
-      return;
-    }
-    if (node.isBoolean() || node.isNumber()) {
-      paths.add(path);
-      return;
-    }
-    if (node.isArray()) {
-      for (int index = 0; index < node.size(); index += 1) {
-        collectFilledLeafPaths(node.get(index), append(path, String.valueOf(index + 1)), paths);
-      }
-      return;
-    }
-    if (node.isObject()) {
-      if ((node.has("value") || node.has("text")) && !node.has("value_bbox")) {
-        JsonNode value = node.has("value") ? node.path("value") : node.path("text");
-        collectFilledLeafPaths(value, path, paths);
-        return;
-      }
-      node.fields().forEachRemaining(entry -> {
-        if (!entry.getKey().startsWith("_")) {
-          collectFilledLeafPaths(entry.getValue(), append(path, entry.getKey()), paths);
-        }
-      });
-    }
-  }
-
-  private boolean hasEvidenceBbox(JsonNode evidencePage, List<String> path, String pageKey) {
-    JsonNode evidence = lookupEvidence(evidencePage, path, pageKey);
-    return hasAny(evidence, "bbox", "value_bbox", "field_bbox", "region", "box");
-  }
-
-  private JsonNode lookupEvidence(JsonNode root, List<String> path, String pageKey) {
-    if (root == null || root.isMissingNode() || root.isNull()) {
-      return MissingNode.getInstance();
-    }
-    String dottedPath = String.join(".", path);
-    JsonNode direct = root.path(dottedPath);
-    if (!direct.isMissingNode()) {
-      return direct;
-    }
-    JsonNode pagePrefixed = root.path(pageKey + "." + dottedPath);
-    if (!pagePrefixed.isMissingNode()) {
-      return pagePrefixed;
-    }
-    JsonNode current = root;
-    for (String part : path) {
-      current = current.path(part);
-      if (current.isMissingNode()) {
-        return current;
-      }
-    }
-    return current;
-  }
-
-  private boolean hasAny(JsonNode node, String... keys) {
-    if (node == null || node.isMissingNode() || node.isNull()) {
-      return false;
-    }
-    for (String key : keys) {
-      JsonNode value = node.path(key);
-      if (!value.isMissingNode() && !value.isNull()) {
-        return true;
-      }
-    }
-    return false;
+  private long elapsedMillisSince(long startedAtNanos) {
+    return Math.max(0, Duration.ofNanos(System.nanoTime() - startedAtNanos).toMillis());
   }
 
   private String extractMessageContent(String responseBody) throws IOException {
@@ -524,12 +456,6 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
       return value;
     }
     return value.substring(0, maxLength) + "...";
-  }
-
-  private List<String> append(List<String> path, String key) {
-    List<String> next = new ArrayList<>(path);
-    next.add(key);
-    return List.copyOf(next);
   }
 
   private record ExtractionResponse(JsonNode data, String rawText) {}

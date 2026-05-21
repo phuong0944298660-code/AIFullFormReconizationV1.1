@@ -141,7 +141,7 @@ class StructuredExtractionClientTest {
   }
 
   @Test
-  void retriesOnceWhenModelReturnsFieldsWithoutPerFieldEvidence() throws Exception {
+  void doesNotRetryWhenModelReturnsFieldsWithoutPerFieldEvidence() throws Exception {
     StubHttpClient httpClient = new StubHttpClient(List.of(
         jsonResponse("{\"page_1\":{\"name\":\"Alice Zhang\"},\"_field_evidence\":{\"page_1\":{\"label\":\"Whole page\",\"value_bbox\":[0,0,100,100]}}}"),
         jsonResponse("{\"page_1\":{\"name\":\"Alice Zhang\"},\"_field_evidence\":{\"page_1\":{\"name\":{\"label\":\"Name\",\"value_bbox\":[10,20,160,50]}}}}")
@@ -157,8 +157,8 @@ class StructuredExtractionClientTest {
         List.of(new RenderedOcrPage(1, new byte[] {1, 2, 3}, "data:image/png;base64,abc123", 1000, 1400))
     );
 
-    assertThat(httpClient.sendCount()).isEqualTo(2);
-    assertThat(result.data().at("/_field_evidence/page_1/name/value_bbox/0").asInt()).isEqualTo(10);
+    assertThat(httpClient.sendCount()).isEqualTo(1);
+    assertThat(result.data().at("/page_1/name").asText()).isEqualTo("Alice Zhang");
   }
 
   @Test
@@ -255,6 +255,37 @@ class StructuredExtractionClientTest {
     );
 
     assertThat(events).containsExactly("started:1", "completed:1");
+  }
+
+  @Test
+  void reportsPerPageAttemptTimingEvents() throws Exception {
+    StructuredExtractionClient client = new StructuredExtractionClient(
+        new LlmProperties(true, "https://apie.zhisuaninfo.com/v1", "test-key", "Qwen3.6-35B-A3B", 4096, 60, 4),
+        new StubHttpClient(jsonResponse("{\"page_1\":{\"surname_en\":\"CHAN\"}}")),
+        objectMapper
+    );
+    List<String> events = new CopyOnWriteArrayList<>();
+
+    client.extract(
+        "sample.pdf",
+        List.of(new RenderedOcrPage(1, new byte[] {1, 2, 3}, "data:image/png;base64,abc123", 1000, 1400)),
+        new ExtractionProgressListener() {
+          @Override
+          public void pageAttemptStarted(int page, int attempt, String reason) {
+            events.add("attempt-started:" + page + ":" + attempt + ":" + reason);
+          }
+
+          @Override
+          public void pageAttemptCompleted(int page, int attempt, String reason, long elapsedMillis) {
+            events.add("attempt-completed:" + page + ":" + attempt + ":" + reason + ":" + (elapsedMillis >= 0));
+          }
+        }
+    );
+
+    assertThat(events).containsExactly(
+        "attempt-started:1:1:initial",
+        "attempt-completed:1:1:initial:true"
+    );
   }
 
   private String jsonResponse(String content) throws Exception {

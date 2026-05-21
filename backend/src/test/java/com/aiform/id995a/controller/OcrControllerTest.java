@@ -99,6 +99,10 @@ class OcrControllerTest {
     org.assertj.core.api.Assertions.assertThat(statusJson.path("progress").asInt()).isEqualTo(100);
     org.assertj.core.api.Assertions.assertThat(statusJson.path("completedPages").asInt()).isEqualTo(1);
     org.assertj.core.api.Assertions.assertThat(statusJson.path("pages").get(0).path("status").asText()).isEqualTo("completed");
+    org.assertj.core.api.Assertions.assertThat(statusJson.path("pages").get(0).path("attempt").asInt()).isEqualTo(1);
+    org.assertj.core.api.Assertions.assertThat(statusJson.path("pages").get(0).path("elapsedMillis").asLong()).isGreaterThanOrEqualTo(0);
+    org.assertj.core.api.Assertions.assertThat(statusJson.path("pages").get(0).path("lastAttemptMillis").asLong()).isEqualTo(15);
+    org.assertj.core.api.Assertions.assertThat(statusJson.path("pages").get(0).path("attemptReason").asText()).isEqualTo("initial");
     org.assertj.core.api.Assertions.assertThat(statusJson.path("result").path("structuredData").path("page_1").path("part_2_personal_particulars").path("surname_en").asText())
         .isEqualTo("CHAN");
   }
@@ -111,6 +115,8 @@ class OcrControllerTest {
       return (filename, pages, progressListener) -> {
         for (com.aiform.id995a.ocr.RenderedOcrPage page : pages) {
           progressListener.pageStarted(page.page());
+          progressListener.pageAttemptStarted(page.page(), 1, "initial");
+          progressListener.pageAttemptCompleted(page.page(), 1, "initial", 15);
           progressListener.pageCompleted(page.page());
         }
         return new StructuredExtractionResult(

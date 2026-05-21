@@ -104,6 +104,21 @@ public class OcrJobService {
         }
 
         @Override
+        public void pageAttemptStarted(int page, int attempt, String reason) {
+          OcrJobState.this.pageAttemptStarted(page, attempt, reason);
+        }
+
+        @Override
+        public void pageAttemptCompleted(int page, int attempt, String reason, long elapsedMillis) {
+          OcrJobState.this.pageAttemptCompleted(page, attempt, reason, elapsedMillis);
+        }
+
+        @Override
+        public void pageAttemptFailed(int page, int attempt, String reason, long elapsedMillis, String message) {
+          OcrJobState.this.pageAttemptFailed(page, attempt, reason, elapsedMillis, message);
+        }
+
+        @Override
         public void pageCompleted(int page) {
           OcrJobState.this.pageCompleted(page);
         }
@@ -124,8 +139,63 @@ public class OcrJobService {
       progress.percent = 0;
       progress.stage = "Qwen 识别中";
       progress.message = "正在识别第 " + page + " 页。";
+      progress.startedAtNanos = System.nanoTime();
+      progress.completedAtNanos = 0;
+      progress.currentAttemptStartedAtNanos = 0;
+      progress.attempt = 0;
+      progress.attemptReason = "";
+      progress.lastAttemptMillis = 0;
       status = "running";
       message = "正在识别第 " + page + " 页。";
+    }
+
+    private synchronized void pageAttemptStarted(int page, int attempt, String reason) {
+      MutablePageProgress progress = pages.computeIfAbsent(
+          page,
+          key -> new MutablePageProgress(key, "pending", 0, "等待识别", "等待 Qwen 开始识别。")
+      );
+      if (progress.startedAtNanos == 0) {
+        progress.startedAtNanos = System.nanoTime();
+      }
+      progress.status = "running";
+      progress.percent = 0;
+      progress.stage = "Qwen 识别中";
+      progress.attempt = Math.max(progress.attempt, attempt);
+      progress.attemptReason = reason == null ? "" : reason;
+      progress.currentAttemptStartedAtNanos = System.nanoTime();
+      progress.message = "第 " + page + " 页第 " + attempt + " 次请求（" + attemptLabel(reason) + "）。";
+      status = "running";
+      message = progress.message;
+    }
+
+    private synchronized void pageAttemptCompleted(int page, int attempt, String reason, long elapsedMillis) {
+      MutablePageProgress progress = pages.computeIfAbsent(
+          page,
+          key -> new MutablePageProgress(key, "pending", 0, "等待识别", "等待 Qwen 开始识别。")
+      );
+      progress.attempt = Math.max(progress.attempt, attempt);
+      progress.attemptReason = reason == null ? "" : reason;
+      progress.lastAttemptMillis = Math.max(0, elapsedMillis);
+      progress.currentAttemptStartedAtNanos = 0;
+      progress.message = "第 " + page + " 页第 " + attempt + " 次请求完成，用时 " + formatDuration(progress.lastAttemptMillis) + "。";
+      status = "running";
+      message = progress.message;
+    }
+
+    private synchronized void pageAttemptFailed(int page, int attempt, String reason, long elapsedMillis, String failureMessage) {
+      MutablePageProgress progress = pages.computeIfAbsent(
+          page,
+          key -> new MutablePageProgress(key, "pending", 0, "等待识别", "等待 Qwen 开始识别。")
+      );
+      progress.attempt = Math.max(progress.attempt, attempt);
+      progress.attemptReason = reason == null ? "" : reason;
+      progress.lastAttemptMillis = Math.max(0, elapsedMillis);
+      progress.currentAttemptStartedAtNanos = 0;
+      progress.message = failureMessage == null || failureMessage.isBlank()
+          ? "第 " + page + " 页第 " + attempt + " 次请求失败。"
+          : failureMessage;
+      status = "running";
+      message = progress.message;
     }
 
     private synchronized void pageCompleted(int page) {
@@ -136,7 +206,10 @@ public class OcrJobService {
       progress.status = "completed";
       progress.percent = 100;
       progress.stage = "已完成";
-      progress.message = "第 " + page + " 页识别完成。";
+      progress.completedAtNanos = System.nanoTime();
+      progress.currentAttemptStartedAtNanos = 0;
+      progress.message = "第 " + page + " 页识别完成，用时 " + formatDuration(progress.elapsedMillis())
+          + "，共 " + Math.max(1, progress.attempt) + " 次请求。";
       status = "running";
       message = "已完成 " + completedPages() + " / " + pages.size() + " 页。";
     }
@@ -149,6 +222,8 @@ public class OcrJobService {
       progress.status = "failed";
       progress.percent = 100;
       progress.stage = "识别失败";
+      progress.completedAtNanos = System.nanoTime();
+      progress.currentAttemptStartedAtNanos = 0;
       progress.message = failureMessage == null || failureMessage.isBlank()
           ? "第 " + page + " 页识别失败。"
           : failureMessage;
@@ -164,7 +239,10 @@ public class OcrJobService {
           page.status = "completed";
           page.percent = 100;
           page.stage = "已完成";
-          page.message = "第 " + page.page + " 页识别完成。";
+          page.completedAtNanos = System.nanoTime();
+          page.currentAttemptStartedAtNanos = 0;
+          page.message = "第 " + page.page + " 页识别完成，用时 " + formatDuration(page.elapsedMillis())
+              + "，共 " + Math.max(1, page.attempt) + " 次请求。";
         }
       }
       status = "completed";
@@ -256,6 +334,24 @@ public class OcrJobService {
           .findFirst()
           .orElse(null);
     }
+
+    private String attemptLabel(String reason) {
+      return switch (reason == null ? "" : reason) {
+        case "initial" -> "首次请求";
+        case "empty_retry" -> "空结果重试";
+        default -> reason == null || reason.isBlank() ? "请求" : reason;
+      };
+    }
+
+    private static String formatDuration(long elapsedMillis) {
+      long seconds = Math.max(elapsedMillis > 0 ? 1 : 0, elapsedMillis / 1000);
+      long minutes = seconds / 60;
+      long remainder = seconds % 60;
+      if (minutes > 0) {
+        return minutes + "分" + remainder + "秒";
+      }
+      return seconds + "秒";
+    }
   }
 
   private static final class MutablePageProgress {
@@ -265,6 +361,12 @@ public class OcrJobService {
     private int percent;
     private String stage;
     private String message;
+    private long startedAtNanos;
+    private long completedAtNanos;
+    private long currentAttemptStartedAtNanos;
+    private int attempt;
+    private String attemptReason = "";
+    private long lastAttemptMillis;
 
     private MutablePageProgress(int page, String status, int percent, String stage, String message) {
       this.page = page;
@@ -275,7 +377,33 @@ public class OcrJobService {
     }
 
     private OcrJobPageProgress snapshot() {
-      return new OcrJobPageProgress(page, status, percent, stage, message);
+      return new OcrJobPageProgress(
+          page,
+          status,
+          percent,
+          stage,
+          message,
+          elapsedMillis(),
+          attempt,
+          attemptReason,
+          lastAttemptMillis,
+          currentAttemptMillis()
+      );
+    }
+
+    private long elapsedMillis() {
+      if (startedAtNanos == 0) {
+        return 0;
+      }
+      long end = completedAtNanos == 0 ? System.nanoTime() : completedAtNanos;
+      return Math.max(0, (end - startedAtNanos) / 1_000_000);
+    }
+
+    private long currentAttemptMillis() {
+      if (!"running".equals(status) || currentAttemptStartedAtNanos == 0) {
+        return 0;
+      }
+      return Math.max(0, (System.nanoTime() - currentAttemptStartedAtNanos) / 1_000_000);
     }
   }
 }
