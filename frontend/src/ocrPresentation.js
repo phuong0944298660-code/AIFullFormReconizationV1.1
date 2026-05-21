@@ -1,5 +1,6 @@
 const LOC_TOKEN = /<LOC_\d+>/g
 const REPLACEMENT_CHAR = /\uFFFD/g
+const APPLICANT_COUNT_PATTERN = /([0-9０-９]+)\s*(?:名|家|个|個|人)?\s*(?:成人|成年人|小孩|小童|兒童|儿童|将出生的婴儿|將出生的嬰兒|嬰兒|婴儿|家庭成员|家庭成員|需要經常照料|需要经常照料|雇工|僱工|傭工|佣工)/
 
 export function lineText(line) {
   return (line?.spans || [])
@@ -229,7 +230,8 @@ function isMetadataObject(value) {
 }
 
 function toFieldRow(path, rawValue, explicitConfidence) {
-  const displayValue = displayFieldValue(path, rawValue)
+  const baseDisplayValue = displayFieldValue(path, rawValue)
+  const displayValue = applicantCountDisplayValue(path, '', rawValue, baseDisplayValue) || baseDisplayValue
   return {
     id: path.join('.'),
     section: humanizePath(path.slice(0, -1)),
@@ -249,7 +251,9 @@ function toFieldRow(path, rawValue, explicitConfidence) {
 function toEvidenceFieldRow(field) {
   const path = String(field.path || 'field')
   const pathParts = path.split('.').filter(Boolean)
-  const displayValue = field.displayValue ?? displayFieldValue(pathParts, field.value)
+  const baseDisplayValue = field.displayValue ?? displayFieldValue(pathParts, field.value)
+  const displayValue = applicantCountDisplayValue(pathParts, field.label || '', field.value, baseDisplayValue) || baseDisplayValue
+  const characters = displayValue === baseDisplayValue ? field.characters || [] : []
   return {
     id: `${field.page || ''}:${path}`,
     section: humanizePath(pathParts.slice(0, -1)),
@@ -263,7 +267,7 @@ function toEvidenceFieldRow(field) {
     ocrText: '',
     ocrStatus: 'not_run',
     ocrConfidence: 0,
-    charSegments: charSegmentsFromText(displayValue, field.characters || [], path)
+    charSegments: charSegmentsFromText(displayValue, characters, path)
   }
 }
 
@@ -277,6 +281,33 @@ function displayFieldValue(path, value) {
     return '签名文字无法辨认'
   }
   return String(value)
+}
+
+function applicantCountDisplayValue(path, label, rawValue, displayValue) {
+  if (!isBinaryLike(rawValue) && !isBinaryLike(displayValue)) return ''
+  const candidates = [
+    label,
+    path.at(-1),
+    path.join(' ')
+  ].filter(Boolean)
+  for (const candidate of candidates) {
+    const match = normalizeDigits(String(candidate)).match(APPLICANT_COUNT_PATTERN)
+    if (match) return match[1]
+  }
+  return ''
+}
+
+function isBinaryLike(value) {
+  if (value === 0 || value === 1) return true
+  if (typeof value === 'string') {
+    const normalized = value.trim()
+    return normalized === '0' || normalized === '1'
+  }
+  return false
+}
+
+function normalizeDigits(value) {
+  return String(value || '').replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xFF10 + 48))
 }
 
 function normalizeConfidence(value, path, rawValue) {

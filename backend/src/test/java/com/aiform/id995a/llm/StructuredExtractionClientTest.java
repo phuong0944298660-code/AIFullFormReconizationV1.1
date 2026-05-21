@@ -61,6 +61,8 @@ class StructuredExtractionClientTest {
     assertThat(payload.toString()).contains("such as 有/没有");
     assertThat(payload.toString()).contains("{\\\"pillow\\\":\\\"没有\\\"}");
     assertThat(payload.toString()).contains("Use true/false only for a standalone checkbox");
+    assertThat(payload.toString()).contains("3名成人");
+    assertThat(payload.toString()).contains("applicant-written number");
   }
 
   @Test

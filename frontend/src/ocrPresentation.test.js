@@ -296,6 +296,65 @@ test('structuredFieldRows keeps LLM fields without OCR model status', () => {
   assert.equal(rows[0].charSegments.every((segment) => segment.reviewFlag === false), true)
 })
 
+test('structuredFieldRows displays applicant-written household counts instead of binary flags', () => {
+  const rows = structuredFieldRows({
+    pages: [
+      {
+        page: 3,
+        structuredFields: [
+          {
+            page: 3,
+            path: '家庭人数_3名成人',
+            label: '3名成人',
+            value: 1,
+            displayValue: '1',
+            confidence: 98,
+            characters: [{ index: 0, text: '1', confidence: 100, status: 'ok' }]
+          },
+          {
+            page: 3,
+            path: '家庭人数_1名小孩',
+            label: '1名小孩',
+            value: 0,
+            displayValue: '0',
+            confidence: 98,
+            characters: [{ index: 0, text: '0', confidence: 100, status: 'ok' }]
+          },
+          {
+            page: 3,
+            path: '家庭人数_1名将出生的婴儿',
+            label: '1名将出生的婴儿',
+            value: 0,
+            displayValue: '0',
+            confidence: 98,
+            characters: [{ index: 0, text: '0', confidence: 100, status: 'ok' }]
+          },
+          {
+            page: 3,
+            path: '家庭人数_0家庭成员需要经常照料',
+            label: '0家庭成员需要经常照料',
+            value: 0,
+            displayValue: '0',
+            confidence: 98,
+            characters: [{ index: 0, text: '0', confidence: 100, status: 'ok' }]
+          },
+          {
+            page: 3,
+            path: '雇工数目',
+            label: '雇工数目',
+            value: 0,
+            displayValue: '0',
+            confidence: 98
+          }
+        ]
+      }
+    ]
+  }, 3)
+
+  assert.deepEqual(rows.map((row) => row.displayValue), ['3', '1', '1', '0', '0'])
+  assert.deepEqual(rows.map((row) => row.charSegments.map((segment) => segment.text).join('')), ['3', '1', '1', '0', '0'])
+})
+
 test('crop placeholder is generic when LLM evidence has no snapshot', () => {
   assert.equal(cropPlaceholderText({ snapshotDataUrl: '' }), '无区域快照')
 })

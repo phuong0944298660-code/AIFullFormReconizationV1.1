@@ -140,6 +140,40 @@ class StructuredFieldEvidenceServiceTest {
   }
 
   @Test
+  void rendersHouseholdCountLabelsAsApplicantWrittenNumbersInsteadOfBinaryFlags() throws Exception {
+    StructuredFieldEvidenceService service = new StructuredFieldEvidenceService();
+    JsonNode structuredData = objectMapper.readTree("""
+        {
+          "page_3": {
+            "家庭人数_3名成人": 1,
+            "家庭人数_1名小孩": 0,
+            "家庭人数_1名将出生的婴儿": 0,
+            "家庭人数_0家庭成员需要经常照料": 0,
+            "雇工数目": 0,
+            "水电供应": "有"
+          }
+        }
+        """);
+
+    Map<Integer, List<StructuredFieldDetail>> details = service.buildFieldDetails(
+        structuredData,
+        List.of(new RenderedOcrPage(3, "", 200, 200))
+    );
+
+    assertThat(details.get(3))
+        .filteredOn(detail -> detail.path().startsWith("家庭人数_") || detail.path().equals("雇工数目"))
+        .extracting(StructuredFieldDetail::displayValue)
+        .containsExactly("3", "1", "1", "0", "0");
+    assertThat(details.get(3).stream()
+        .filter(detail -> detail.path().equals("家庭人数_3名成人"))
+        .findFirst()
+        .orElseThrow()
+        .characters())
+        .extracting(FieldCharacterEvidence::text)
+        .containsExactly("3");
+  }
+
+  @Test
   void ignoresNoApplicantInputMarkerWhenBuildingVisibleFieldDetails() throws Exception {
     StructuredFieldEvidenceService service = new StructuredFieldEvidenceService();
     JsonNode structuredData = objectMapper.readTree("""

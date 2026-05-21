@@ -12,11 +12,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
 import org.springframework.stereotype.Service;
 
 @Service
 public class StructuredFieldEvidenceService {
+
+  private static final Pattern APPLICANT_COUNT_PATTERN = Pattern.compile(
+      "([0-9０-９]+)\\s*(?:名|家|个|個|人)?\\s*(?:成人|成年人|小孩|小童|兒童|儿童|将出生的婴儿|將出生的嬰兒|嬰兒|婴儿|家庭成员|家庭成員|需要經常照料|需要经常照料|雇工|僱工|傭工|佣工)"
+  );
 
   public StructuredFieldEvidenceService() {}
 
@@ -55,14 +61,21 @@ public class StructuredFieldEvidenceService {
     double confidence = confidence(evidence, confidenceData, candidate.path(), candidate.value(), pageKey);
     List<Integer> bbox = parseBbox(evidence, page.imageWidth(), page.imageHeight());
     CropResult crop = crop(page, bbox);
-    String valueText = valueText(candidate.value());
-    List<FieldCharacterEvidence> characters = characters(evidence, valueText, bbox);
+    String label = label(evidence, candidate.path());
+    String displayValue = displayValue(candidate.path(), label, candidate.value());
+    String rawValueText = valueText(candidate.value());
+    String valueText = valueText(candidate.value(), displayValue);
+    List<FieldCharacterEvidence> characters = characters(
+        valueText.equals(rawValueText) ? evidence : NullNode.getInstance(),
+        valueText,
+        bbox
+    );
     return new PreparedField(
         page.page(),
         candidate.path(),
-        label(evidence, candidate.path()),
+        label,
         candidate.value(),
-        displayValue(candidate.path(), label(evidence, candidate.path()), candidate.value()),
+        displayValue,
         confidence,
         bbox,
         crop,
@@ -382,6 +395,10 @@ public class StructuredFieldEvidenceService {
       }
       return value.asBoolean() ? "有" : "没有";
     }
+    String applicantCount = applicantCountFromFieldName(path, label, value);
+    if (!applicantCount.isBlank()) {
+      return applicantCount;
+    }
     String text = value.asText("");
     if (text.isBlank()) {
       return "未填写";
@@ -412,6 +429,66 @@ public class StructuredFieldEvidenceService {
       return "";
     }
     return value.asText("");
+  }
+
+  private String valueText(JsonNode value, String displayValue) {
+    String rawText = valueText(value);
+    if (isBinaryLike(value) && displayValue != null && displayValue.matches("\\d+") && !displayValue.equals(rawText)) {
+      return displayValue;
+    }
+    return rawText;
+  }
+
+  private String applicantCountFromFieldName(List<String> path, String label, JsonNode value) {
+    if (!isBinaryLike(value)) {
+      return "";
+    }
+    List<String> candidates = new ArrayList<>();
+    if (label != null && !label.isBlank()) {
+      candidates.add(label);
+    }
+    if (!path.isEmpty()) {
+      candidates.add(path.get(path.size() - 1));
+    }
+    candidates.add(String.join(" ", path));
+    for (String candidate : candidates) {
+      Matcher matcher = APPLICANT_COUNT_PATTERN.matcher(normalizeDigits(candidate));
+      if (matcher.find()) {
+        return matcher.group(1);
+      }
+    }
+    return "";
+  }
+
+  private boolean isBinaryLike(JsonNode value) {
+    if (value == null || value.isNull() || value.isMissingNode()) {
+      return false;
+    }
+    if (value.isNumber()) {
+      double number = value.asDouble();
+      return number == 0 || number == 1;
+    }
+    if (value.isTextual()) {
+      String text = value.asText("").trim();
+      return "0".equals(text) || "1".equals(text);
+    }
+    return false;
+  }
+
+  private String normalizeDigits(String text) {
+    if (text == null || text.isBlank()) {
+      return "";
+    }
+    StringBuilder builder = new StringBuilder(text.length());
+    for (int index = 0; index < text.length(); index += 1) {
+      char character = text.charAt(index);
+      if (character >= '０' && character <= '９') {
+        builder.append((char) ('0' + character - '０'));
+      } else {
+        builder.append(character);
+      }
+    }
+    return builder.toString();
   }
 
   private boolean isSignaturePath(List<String> path) {
