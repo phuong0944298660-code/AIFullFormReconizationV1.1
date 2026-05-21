@@ -34,7 +34,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -43,7 +44,8 @@ button {
 }
 
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 3px solid rgba(0, 109, 119, 0.25);
   outline-offset: 2px;
 }
@@ -116,10 +118,28 @@ svg {
   white-space: nowrap;
 }
 
-.model-pill strong,
+.model-pill select,
 .status-chip {
   color: var(--blue);
   font-weight: 800;
+}
+
+.model-pill label {
+  font-size: 14px;
+}
+
+.model-pill select {
+  min-width: 230px;
+  border: 0;
+  background: transparent;
+  color: var(--blue);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.model-pill select:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .upload-stage {
@@ -351,6 +371,13 @@ svg {
 .error-text {
   color: var(--danger);
   font-size: 13px;
+  text-align: center;
+}
+
+.hint-text {
+  color: var(--amber);
+  font-size: 13px;
+  line-height: 1.5;
   text-align: center;
 }
 
@@ -816,6 +843,11 @@ svg {
   .secondary-action {
     width: 100%;
     justify-content: center;
+  }
+
+  .model-pill select {
+    min-width: 0;
+    width: 100%;
   }
 
   .capability-row {

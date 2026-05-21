@@ -26,7 +26,9 @@ import org.springframework.test.web.servlet.MockMvc;
 @SpringBootTest(properties = {
     "rag.enabled=false",
     "llm.enabled=true",
-    "llm.model=Qwen3.6-35B-A3B"
+    "llm.model=Qwen3.6-35B-A3B",
+    "llm.api-key=test-local-key",
+    "dashscope.api-key=test-dashscope-key"
 })
 @AutoConfigureMockMvc
 @Import(OcrControllerTest.FakeStructuredExtractionConfig.class)
@@ -37,6 +39,21 @@ class OcrControllerTest {
 
   @Autowired
   private ObjectMapper objectMapper;
+
+  @Test
+  void returnsConfiguredLlmModelOptionsForFrontendDropdown() throws Exception {
+    mockMvc.perform(get("/api/llm/models"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.defaultModelId", equalTo("local-qwen3.6-35b-a3b")))
+        .andExpect(jsonPath("$.models", hasSize(2)))
+        .andExpect(jsonPath("$.models[0].id", equalTo("local-qwen3.6-35b-a3b")))
+        .andExpect(jsonPath("$.models[0].label", equalTo("Qwen3.6-35B-A3B 视觉结构化")))
+        .andExpect(jsonPath("$.models[0].available", equalTo(true)))
+        .andExpect(jsonPath("$.models[1].id", equalTo("dashscope-qwen3.6-35b-a3b")))
+        .andExpect(jsonPath("$.models[1].label", equalTo("Qwen3.6-35B-A3B（官方原生）")))
+        .andExpect(jsonPath("$.models[1].model", equalTo("qwen3.6-35b-a3b")))
+        .andExpect(jsonPath("$.models[1].available", equalTo(true)));
+  }
 
   @Test
   void uploadsDocumentAndReturnsSplitScreenStructuredLlmPayload() throws Exception {

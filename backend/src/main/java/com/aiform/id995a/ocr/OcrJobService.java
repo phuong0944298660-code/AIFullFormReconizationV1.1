@@ -29,10 +29,14 @@ public class OcrJobService {
   }
 
   public OcrJobStatusResponse start(String filename, String contentType, byte[] fileBytes) {
+    return start(filename, contentType, fileBytes, null);
+  }
+
+  public OcrJobStatusResponse start(String filename, String contentType, byte[] fileBytes, String modelId) {
     String jobId = UUID.randomUUID().toString();
     OcrJobState state = new OcrJobState(jobId, ocrDemoService.normalizeFilename(filename));
     jobs.put(jobId, state);
-    executor.submit(() -> runJob(state, filename, contentType, fileBytes));
+    executor.submit(() -> runJob(state, filename, contentType, fileBytes, modelId));
     return state.snapshot();
   }
 
@@ -44,7 +48,7 @@ public class OcrJobService {
     return state.snapshot();
   }
 
-  private void runJob(OcrJobState state, String filename, String contentType, byte[] fileBytes) {
+  private void runJob(OcrJobState state, String filename, String contentType, byte[] fileBytes, String modelId) {
     try {
       state.markRendering();
       List<RenderedOcrPage> pages = pageRenderer.render(filename, contentType, fileBytes);
@@ -52,7 +56,8 @@ public class OcrJobService {
       OcrDemoResponse result = ocrDemoService.recognizeRendered(
           state.filename(),
           pages,
-          state.progressListener()
+          state.progressListener(),
+          modelId
       );
       state.markCompleted(result);
     } catch (IOException | RuntimeException exception) {

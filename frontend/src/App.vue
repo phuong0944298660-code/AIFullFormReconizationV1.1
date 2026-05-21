@@ -27,6 +27,8 @@ const progressStage = ref(runtimeState.progressStage || '')
 const progressDetail = ref(runtimeState.progressDetail || '')
 const jobStatus = ref(runtimeState.jobStatus || null)
 const activeJobId = ref(runtimeState.activeJobId || '')
+const modelOptions = ref(runtimeState.modelOptions || [])
+const selectedModelId = ref(runtimeState.selectedModelId || '')
 let activeRunId = 0
 
 const pages = computed(() => response.value?.pages || [])
@@ -55,6 +57,14 @@ const currentPageFieldRows = computed(() => {
 })
 const currentPageConclusion = computed(() => pageFieldConclusion(currentPageFieldRows.value))
 const globalFieldConclusion = computed(() => documentFieldConclusion(response.value))
+const selectedModel = computed(() => {
+  return modelOptions.value.find((model) => model.id === selectedModelId.value) || modelOptions.value[0] || null
+})
+const selectedModelLabel = computed(() => selectedModel.value?.label || 'Qwen3.6-35B-A3B 视觉结构化')
+const selectedModelUnavailableReason = computed(() => {
+  if (!selectedModel.value || selectedModel.value.available !== false) return ''
+  return selectedModel.value.unavailableReason || '该模型未配置 API Key'
+})
 const currentPageFieldSections = computed(() => {
   const groups = new Map()
   for (const row of currentPageFieldRows.value) {
@@ -67,7 +77,20 @@ const currentPageFieldSections = computed(() => {
 const jobProgressItems = computed(() => pageProgressItems(jobStatus.value))
 
 watch(
-  [response, activePage, resultTab, loading, error, progress, progressStage, progressDetail, jobStatus, activeJobId],
+  [
+    response,
+    activePage,
+    resultTab,
+    loading,
+    error,
+    progress,
+    progressStage,
+    progressDetail,
+    jobStatus,
+    activeJobId,
+    modelOptions,
+    selectedModelId
+  ],
   persistRuntimeState,
   { deep: false }
 )
@@ -115,6 +138,7 @@ async function submitOcr() {
   try {
     const body = new FormData()
     body.append('file', file.value)
+    if (selectedModelId.value) body.append('modelId', selectedModelId.value)
     const startResult = await fetch(`${apiBase}/api/ocr/jobs`, { method: 'POST', body })
     if (!startResult.ok) {
       const text = await startResult.text()
@@ -142,6 +166,44 @@ async function submitOcr() {
       loading.value = false
     }
   }
+}
+
+async function fetchModelOptions() {
+  try {
+    const result = await fetch(`${apiBase}/api/llm/models`)
+    if (!result.ok) throw new Error(`HTTP ${result.status}`)
+    const payload = await result.json()
+    const models = Array.isArray(payload.models) ? payload.models : []
+    modelOptions.value = models.length ? models : fallbackModelOptions()
+    ensureSelectedModel(payload.defaultModelId)
+  } catch {
+    modelOptions.value = fallbackModelOptions()
+    ensureSelectedModel()
+  }
+}
+
+function ensureSelectedModel(defaultModelId = '') {
+  const models = modelOptions.value
+  if (!models.length) return
+  const current = models.find((model) => model.id === selectedModelId.value && model.available !== false)
+  if (current) return
+  const preferred = models.find((model) => model.id === defaultModelId && model.available !== false)
+  const selected = preferred || models.find((model) => model.selected && model.available !== false) || models.find((model) => model.available !== false) || models[0]
+  selectedModelId.value = selected.id
+}
+
+function fallbackModelOptions() {
+  return [
+    {
+      id: 'local-qwen3.6-35b-a3b',
+      label: 'Qwen3.6-35B-A3B 视觉结构化',
+      model: 'Qwen3.6-35B-A3B',
+      provider: 'OpenAI-compatible local gateway',
+      available: true,
+      selected: true,
+      unavailableReason: ''
+    }
+  ]
 }
 
 async function pollJobUntilComplete(jobId, runId) {
@@ -306,9 +368,12 @@ function persistRuntimeState() {
   runtimeState.progressDetail = progressDetail.value
   runtimeState.jobStatus = jobStatus.value
   runtimeState.activeJobId = activeJobId.value
+  runtimeState.modelOptions = modelOptions.value
+  runtimeState.selectedModelId = selectedModelId.value
 }
 
 onMounted(() => {
+  fetchModelOptions()
   restoreLastJob()
 })
 
@@ -326,8 +391,17 @@ onBeforeUnmount(() => {
         <p class="header-copy">PDF 或图片按整页送入多模态大模型，右侧展示自动生成的结构化 JSON。</p>
       </div>
       <div class="model-pill">
-        <span>识别模型</span>
-        <strong>Qwen3.6-35B-A3B 视觉结构化</strong>
+        <label for="llm-model-select">识别模型</label>
+        <select id="llm-model-select" v-model="selectedModelId" :disabled="loading">
+          <option
+            v-for="model in modelOptions"
+            :key="model.id"
+            :value="model.id"
+            :disabled="model.available === false"
+          >
+            {{ model.label }}{{ model.available === false ? `（${model.unavailableReason || '未配置'}）` : '' }}
+          </option>
+        </select>
       </div>
     </header>
 
@@ -363,6 +437,7 @@ onBeforeUnmount(() => {
           <span>English</span>
           <span>手写内容</span>
         </div>
+        <p v-if="selectedModelUnavailableReason" class="hint-text">{{ selectedModelUnavailableReason }}</p>
 
         <div v-if="loading" class="progress-box" aria-live="polite">
           <div class="progress-track">
@@ -387,7 +462,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <button v-else class="primary-action" type="button" :disabled="!file" @click="submitOcr">
+        <button v-else class="primary-action" type="button" :disabled="!file || !!selectedModelUnavailableReason" @click="submitOcr">
           开始 LLM 识别
         </button>
         <p v-if="error" class="error-text">{{ error }}</p>

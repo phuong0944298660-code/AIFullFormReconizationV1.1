@@ -40,6 +40,12 @@ llm:
   timeout-seconds: ${LLM_TIMEOUT_SECONDS:1200}
   page-concurrency: ${LLM_PAGE_CONCURRENCY:4}
 
+dashscope:
+  base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+  api-key: ${DASHSCOPE_API_KEY:}
+  model: ${DASHSCOPE_MODEL:qwen3.6-35b-a3b}
+  enable-thinking: ${DASHSCOPE_ENABLE_THINKING:true}
+
 field-ocr:
   enabled: ${FIELD_OCR_ENABLED:false}
   base-url: ${FIELD_OCR_BASE_URL:http://127.0.0.1:18092}

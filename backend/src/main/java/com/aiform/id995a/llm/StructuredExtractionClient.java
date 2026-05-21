@@ -58,12 +58,23 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
       List<RenderedOcrPage> pages,
       ExtractionProgressListener progressListener
   ) throws IOException {
-    if (blank(properties.apiKey())) {
+    return extract(filename, pages, progressListener, defaultProfile());
+  }
+
+  @Override
+  public StructuredExtractionResult extract(
+      String filename,
+      List<RenderedOcrPage> pages,
+      ExtractionProgressListener progressListener,
+      LlmModelProfile modelProfile
+  ) throws IOException {
+    LlmModelProfile profile = modelProfile == null ? defaultProfile() : modelProfile;
+    if (blank(profile.apiKey())) {
       throw new IOException("Missing LLM API key. Set LLM_API_KEY.");
     }
     ExtractionProgressListener listener = progressListener == null ? ExtractionProgressListener.NOOP : progressListener;
     try {
-      List<PageExtraction> pageExtractions = extractPages(filename, pages, listener);
+      List<PageExtraction> pageExtractions = extractPages(filename, pages, listener, profile);
       ObjectNode combined = objectMapper.createObjectNode();
       combined.put("source_file", filename == null || filename.isBlank() ? "uploaded-document" : filename);
       combined.put("total_pages", pages.size());
@@ -89,7 +100,7 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
       if (!hasAnyPageFields && !pages.isEmpty()) {
         throw new IOException("LLM returned empty structured JSON after retry.");
       }
-      return new StructuredExtractionResult(combined, rawText.toString(), properties.model());
+      return new StructuredExtractionResult(combined, rawText.toString(), profile.model());
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
       throw new IOException("LLM request interrupted.", exception);
@@ -99,14 +110,15 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
   private List<PageExtraction> extractPages(
       String filename,
       List<RenderedOcrPage> pages,
-      ExtractionProgressListener progressListener
+      ExtractionProgressListener progressListener,
+      LlmModelProfile profile
   ) throws IOException, InterruptedException {
     int concurrency = pageConcurrency(pages.size());
     ExecutorService executor = Executors.newFixedThreadPool(concurrency);
     try {
       List<Future<PageExtraction>> futures = new ArrayList<>();
       for (RenderedOcrPage page : pages) {
-        futures.add(executor.submit(() -> extractPage(filename, pages.size(), page, progressListener)));
+        futures.add(executor.submit(() -> extractPage(filename, pages.size(), page, progressListener, profile)));
       }
       List<PageExtraction> results = new ArrayList<>();
       for (Future<PageExtraction> future : futures) {
@@ -135,17 +147,18 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
       String filename,
       int totalPages,
       RenderedOcrPage page,
-      ExtractionProgressListener progressListener
+      ExtractionProgressListener progressListener,
+      LlmModelProfile profile
   ) throws IOException {
     progressListener.pageStarted(page.page());
     try {
-      ExtractionResponse extraction = sendPageAttempt(filename, totalPages, page, progressListener, 1, "initial", false);
+      ExtractionResponse extraction = sendPageAttempt(filename, totalPages, page, progressListener, profile, 1, "initial", false);
       if (isNoApplicantInputPage(extraction.data(), page)) {
         progressListener.pageCompleted(page.page());
         return new PageExtraction(page.page(), extraction);
       }
       if (isEmptyExtraction(extraction.data(), List.of(page))) {
-        extraction = sendPageAttempt(filename, totalPages, page, progressListener, 2, "empty_retry", true);
+        extraction = sendPageAttempt(filename, totalPages, page, progressListener, profile, 2, "empty_retry", true);
       }
       if (isEmptyExtraction(extraction.data(), List.of(page))) {
         extraction = new ExtractionResponse(objectMapper.createObjectNode(), extraction.rawText());
@@ -167,6 +180,7 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
       int totalPages,
       RenderedOcrPage page,
       ExtractionProgressListener progressListener,
+      LlmModelProfile profile,
       int attempt,
       String reason,
       boolean retryAfterEmptyResponse
@@ -175,7 +189,8 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
     progressListener.pageAttemptStarted(page.page(), attempt, reason);
     try {
       ExtractionResponse response = sendExtractionRequest(
-          buildRequestPayload(filename, List.of(page), retryAfterEmptyResponse, totalPages)
+          buildRequestPayload(filename, List.of(page), retryAfterEmptyResponse, totalPages, profile),
+          profile
       );
       progressListener.pageAttemptCompleted(page.page(), attempt, reason, elapsedMillisSince(startedAt));
       return response;
@@ -200,23 +215,28 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
   }
 
   JsonNode buildRequestPayload(String filename, List<RenderedOcrPage> pages) {
-    return buildRequestPayload(filename, pages, false, pages.size());
+    return buildRequestPayload(filename, pages, false, pages.size(), defaultProfile());
+  }
+
+  JsonNode buildRequestPayload(String filename, List<RenderedOcrPage> pages, LlmModelProfile profile) {
+    return buildRequestPayload(filename, pages, false, pages.size(), profile == null ? defaultProfile() : profile);
   }
 
   private JsonNode buildRequestPayload(
       String filename,
       List<RenderedOcrPage> pages,
       boolean retryAfterEmptyResponse,
-      int totalPages
+      int totalPages,
+      LlmModelProfile profile
   ) {
     ObjectNode root = objectMapper.createObjectNode();
-    root.put("model", blank(properties.model()) ? "Qwen3.6-35B-A3B" : properties.model());
+    root.put("model", blank(profile.model()) ? "Qwen3.6-35B-A3B" : profile.model());
     root.put("temperature", 0);
     root.put("max_tokens", Math.max(1024, properties.maxTokens()));
     root.put("stream", false);
-    root.put("enable_thinking", false);
+    root.put("enable_thinking", profile.enableThinking());
     ObjectNode chatTemplateOptions = root.putObject("chat_template_kwargs");
-    chatTemplateOptions.put("enable_thinking", false);
+    chatTemplateOptions.put("enable_thinking", profile.enableThinking());
     ObjectNode responseFormat = root.putObject("response_format");
     responseFormat.put("type", "json_object");
 
@@ -243,12 +263,12 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
     return root;
   }
 
-  private ExtractionResponse sendExtractionRequest(JsonNode payload) throws IOException, InterruptedException {
+  private ExtractionResponse sendExtractionRequest(JsonNode payload, LlmModelProfile profile) throws IOException, InterruptedException {
     HttpRequest request = HttpRequest.newBuilder()
-        .uri(URI.create(trimTrailingSlash(properties.baseUrl()) + "/chat/completions"))
+        .uri(URI.create(trimTrailingSlash(profile.baseUrl()) + "/chat/completions"))
         .version(HttpClient.Version.HTTP_1_1)
         .timeout(Duration.ofSeconds(Math.max(10, properties.timeoutSeconds())))
-        .header("Authorization", "Bearer " + properties.apiKey())
+        .header("Authorization", "Bearer " + profile.apiKey())
         .header("Content-Type", "application/json")
         .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
         .build();
@@ -456,6 +476,20 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
       return value;
     }
     return value.substring(0, maxLength) + "...";
+  }
+
+  private LlmModelProfile defaultProfile() {
+    return new LlmModelProfile(
+        LlmModelRegistry.DEFAULT_MODEL_ID,
+        "Qwen3.6-35B-A3B 视觉结构化",
+        blank(properties.model()) ? "Qwen3.6-35B-A3B" : properties.model(),
+        "OpenAI-compatible local gateway",
+        blank(properties.baseUrl()) ? DEFAULT_BASE_URL : properties.baseUrl(),
+        properties.apiKey(),
+        false,
+        true,
+        blank(properties.apiKey()) ? "缺少 LLM_API_KEY" : ""
+    );
   }
 
   private record ExtractionResponse(JsonNode data, String rawText) {}

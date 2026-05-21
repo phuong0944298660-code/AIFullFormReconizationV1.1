@@ -44,6 +44,10 @@ services:
       - LLM_BASE_URL=${LLM_BASE_URL:-https://apie.zhisuaninfo.com/v1}
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_MODEL=${LLM_MODEL:-Qwen3.6-35B-A3B}
+      - DASHSCOPE_BASE_URL=${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - DASHSCOPE_MODEL=${DASHSCOPE_MODEL:-qwen3.6-35b-a3b}
+      - DASHSCOPE_ENABLE_THINKING=${DASHSCOPE_ENABLE_THINKING:-true}
       - FIELD_OCR_ENABLED=true
       - FIELD_OCR_BASE_URL=http://ocr-service:18092
       - FIELD_OCR_TIMEOUT_SECONDS=${FIELD_OCR_TIMEOUT_SECONDS:-20}

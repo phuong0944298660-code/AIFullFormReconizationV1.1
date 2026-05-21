@@ -3,6 +3,8 @@ package com.aiform.id995a.ocr;
 import com.aiform.id995a.llm.StructuredExtractionGateway;
 import com.aiform.id995a.llm.StructuredExtractionResult;
 import com.aiform.id995a.llm.ExtractionProgressListener;
+import com.aiform.id995a.llm.LlmModelProfile;
+import com.aiform.id995a.llm.LlmModelRegistry;
 import com.aiform.id995a.review.EngineStatus;
 import java.io.IOException;
 import java.util.List;
@@ -15,20 +17,27 @@ public class OcrDemoService {
   private final BaiduOcrPageRenderer pageRenderer;
   private final StructuredExtractionGateway structuredExtractionGateway;
   private final StructuredFieldEvidenceService structuredFieldEvidenceService;
+  private final LlmModelRegistry llmModelRegistry;
 
   public OcrDemoService(
       BaiduOcrPageRenderer pageRenderer,
       StructuredExtractionGateway structuredExtractionGateway,
-      StructuredFieldEvidenceService structuredFieldEvidenceService
+      StructuredFieldEvidenceService structuredFieldEvidenceService,
+      LlmModelRegistry llmModelRegistry
   ) {
     this.pageRenderer = pageRenderer;
     this.structuredExtractionGateway = structuredExtractionGateway;
     this.structuredFieldEvidenceService = structuredFieldEvidenceService;
+    this.llmModelRegistry = llmModelRegistry;
   }
 
   public OcrDemoResponse recognize(String filename, String contentType, byte[] fileBytes) throws IOException {
+    return recognize(filename, contentType, fileBytes, null);
+  }
+
+  public OcrDemoResponse recognize(String filename, String contentType, byte[] fileBytes, String modelId) throws IOException {
     List<RenderedOcrPage> pages = pageRenderer.render(filename, contentType, fileBytes);
-    return recognizeRendered(normalizeFilename(filename), pages, ExtractionProgressListener.NOOP);
+    return recognizeRendered(normalizeFilename(filename), pages, ExtractionProgressListener.NOOP, modelId);
   }
 
   public OcrDemoResponse recognizeRendered(
@@ -36,8 +45,18 @@ public class OcrDemoService {
       List<RenderedOcrPage> pages,
       ExtractionProgressListener progressListener
   ) throws IOException {
+    return recognizeRendered(filename, pages, progressListener, null);
+  }
+
+  public OcrDemoResponse recognizeRendered(
+      String filename,
+      List<RenderedOcrPage> pages,
+      ExtractionProgressListener progressListener,
+      String modelId
+  ) throws IOException {
     String normalizedFilename = normalizeFilename(filename);
-    StructuredExtractionResult extraction = structuredExtractionGateway.extract(normalizedFilename, pages, progressListener);
+    LlmModelProfile modelProfile = llmModelRegistry.resolve(modelId);
+    StructuredExtractionResult extraction = structuredExtractionGateway.extract(normalizedFilename, pages, progressListener, modelProfile);
     Map<Integer, List<StructuredFieldDetail>> fieldDetailsByPage =
         structuredFieldEvidenceService.buildFieldDetails(extraction.data(), pages);
     List<OcrPage> responsePages = pages.stream()

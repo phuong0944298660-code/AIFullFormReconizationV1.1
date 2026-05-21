@@ -14,9 +14,18 @@ set LLM_MODEL=Qwen3.6-35B-A3B
 set LLM_API_KEY=replace-with-your-key
 ```
 
+The frontend model dropdown also supports the Aliyun DashScope native model:
+
+```cmd
+set DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+set DASHSCOPE_MODEL=qwen3.6-35b-a3b
+set DASHSCOPE_ENABLE_THINKING=true
+set DASHSCOPE_API_KEY=replace-with-your-dashscope-key
+```
+
 Do not commit real model credentials into this repository.
 
-For double-click startup, copy `llm.local.cmd.example` to `llm.local.cmd` and fill in the credential. The real local file is ignored by `.gitignore`.
+For double-click startup, copy `llm.local.cmd.example` to `llm.local.cmd` and fill in the credential(s). The real local file is ignored by `.gitignore`.
 
 The legacy Baidu OCR settings remain in the backend configuration for optional experiments, but the current demo path is LLM-only.
 

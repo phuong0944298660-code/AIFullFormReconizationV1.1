@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
@@ -78,6 +79,47 @@ class StructuredExtractionClientTest {
     assertThat(result.model()).isEqualTo("Qwen3.6-35B-A3B");
     assertThat(result.data().at("/page_1/travel_document_no").asText()).isEqualTo("PH88342115");
     assertThat(result.rawText()).contains("travel_document_no");
+  }
+
+  @Test
+  void usesSelectedModelProfileForDashScopeCompatibleRequest() throws Exception {
+    StubHttpClient httpClient = new StubHttpClient(jsonResponse("{\"page_1\":{\"surname_en\":\"CHAN\"}}"));
+    StructuredExtractionClient client = new StructuredExtractionClient(
+        new LlmProperties(true, "https://apie.zhisuaninfo.com/v1", "local-key", "Qwen3.6-35B-A3B", 4096, 60, 4),
+        httpClient,
+        objectMapper
+    );
+    LlmModelProfile profile = new LlmModelProfile(
+        "dashscope-qwen3.6-35b-a3b",
+        "Qwen3.6-35B-A3B（官方原生）",
+        "qwen3.6-35b-a3b",
+        "DashScope OpenAI-compatible",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "dashscope-key",
+        true,
+        false,
+        ""
+    );
+
+    JsonNode payload = client.buildRequestPayload(
+        "sample.pdf",
+        List.of(new RenderedOcrPage(1, new byte[] {1, 2, 3}, "data:image/png;base64,abc123", 1000, 1400)),
+        profile
+    );
+    StructuredExtractionResult result = client.extract(
+        "sample.pdf",
+        List.of(new RenderedOcrPage(1, new byte[] {1, 2, 3}, "data:image/png;base64,abc123", 1000, 1400)),
+        ExtractionProgressListener.NOOP,
+        profile
+    );
+
+    assertThat(payload.path("model").asText()).isEqualTo("qwen3.6-35b-a3b");
+    assertThat(payload.path("enable_thinking").asBoolean()).isTrue();
+    assertThat(payload.path("chat_template_kwargs").path("enable_thinking").asBoolean()).isTrue();
+    assertThat(result.model()).isEqualTo("qwen3.6-35b-a3b");
+    assertThat(httpClient.lastRequest().uri().toString())
+        .isEqualTo("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
+    assertThat(httpClient.lastRequest().headers().firstValue("Authorization")).contains("Bearer dashscope-key");
   }
 
   @Test
@@ -313,6 +355,7 @@ class StructuredExtractionClientTest {
   private static final class StubHttpClient extends HttpClient {
     private final List<?> outcomes;
     private final AtomicInteger sendCount = new AtomicInteger();
+    private final AtomicReference<HttpRequest> lastRequest = new AtomicReference<>();
 
     private StubHttpClient(String body) {
       this(List.of(body));
@@ -324,6 +367,10 @@ class StructuredExtractionClientTest {
 
     private int sendCount() {
       return sendCount.get();
+    }
+
+    private HttpRequest lastRequest() {
+      return lastRequest.get();
     }
 
     @Override
@@ -379,6 +426,7 @@ class StructuredExtractionClientTest {
     @SuppressWarnings("unchecked")
     public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler)
         throws java.io.IOException {
+      lastRequest.set(request);
       int index = sendCount.getAndIncrement();
       Object outcome = outcomes.get(Math.min(index, outcomes.size() - 1));
       if (outcome instanceof java.io.IOException exception) {

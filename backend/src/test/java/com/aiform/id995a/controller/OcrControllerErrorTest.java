@@ -25,7 +25,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @SpringBootTest(properties = {
     "rag.enabled=false",
     "llm.enabled=true",
-    "llm.model=Qwen3.6-35B-A3B"
+    "llm.model=Qwen3.6-35B-A3B",
+    "llm.api-key=test-local-key"
 })
 @AutoConfigureMockMvc
 @Import(OcrControllerErrorTest.FailingStructuredExtractionConfig.class)

@@ -5,3 +5,7 @@ set LLM_MODEL=Qwen3.6-35B-A3B
 set LLM_MAX_TOKENS=8192
 set LLM_TIMEOUT_SECONDS=180
 set LLM_API_KEY=replace-with-your-key
+set DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+set DASHSCOPE_MODEL=qwen3.6-35b-a3b
+set DASHSCOPE_ENABLE_THINKING=true
+set DASHSCOPE_API_KEY=replace-with-your-dashscope-key

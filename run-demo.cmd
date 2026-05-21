@@ -20,8 +20,8 @@ pause
 exit /b 1
 
 :local
-if "%LLM_API_KEY%"=="" (
-    echo [ERROR] Set LLM_API_KEY, or create llm.local.cmd with your OpenAI-compatible API settings.
+if "%LLM_API_KEY%%DASHSCOPE_API_KEY%"=="" (
+    echo [ERROR] Set LLM_API_KEY or DASHSCOPE_API_KEY, or create llm.local.cmd with your OpenAI-compatible API settings.
     pause
     exit /b 1
 )
@@ -55,8 +55,8 @@ echo.
 goto end
 
 :docker
-if "%LLM_API_KEY%"=="" (
-    echo [ERROR] Set LLM_API_KEY, or create llm.local.cmd with your OpenAI-compatible API settings.
+if "%LLM_API_KEY%%DASHSCOPE_API_KEY%"=="" (
+    echo [ERROR] Set LLM_API_KEY or DASHSCOPE_API_KEY, or create llm.local.cmd with your OpenAI-compatible API settings.
     pause
     exit /b 1
 )
