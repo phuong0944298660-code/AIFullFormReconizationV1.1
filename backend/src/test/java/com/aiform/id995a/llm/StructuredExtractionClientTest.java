@@ -93,7 +93,7 @@ class StructuredExtractionClientTest {
     );
     LlmModelProfile profile = new LlmModelProfile(
         "dashscope-qwen3.6-35b-a3b",
-        "Qwen3.6-35B-A3B（官方原生）",
+        "云原生模型",
         "qwen3.6-35b-a3b",
         "DashScope OpenAI-compatible",
         "https://dashscope.aliyuncs.com/compatible-mode/v1",

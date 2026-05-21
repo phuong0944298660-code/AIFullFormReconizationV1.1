@@ -10,6 +10,8 @@ public class LlmModelRegistry {
 
   public static final String DEFAULT_MODEL_ID = "local-qwen3.6-35b-a3b";
   public static final String DASHSCOPE_MODEL_ID = "dashscope-qwen3.6-35b-a3b";
+  public static final String DEFAULT_MODEL_LABEL = "本地模型";
+  public static final String DASHSCOPE_MODEL_LABEL = "云原生模型";
 
   private final LlmProperties llmProperties;
   private final DashScopeProperties dashScopeProperties;
@@ -49,7 +51,7 @@ public class LlmModelRegistry {
     return List.of(
         new LlmModelProfile(
             DEFAULT_MODEL_ID,
-            "Qwen3.6-35B-A3B 视觉结构化",
+            DEFAULT_MODEL_LABEL,
             blank(llmProperties.model()) ? "Qwen3.6-35B-A3B" : llmProperties.model(),
             "OpenAI-compatible local gateway",
             blank(llmProperties.baseUrl()) ? "https://apie.zhisuaninfo.com/v1" : llmProperties.baseUrl(),
@@ -60,7 +62,7 @@ public class LlmModelRegistry {
         ),
         new LlmModelProfile(
             DASHSCOPE_MODEL_ID,
-            "Qwen3.6-35B-A3B（官方原生）",
+            DASHSCOPE_MODEL_LABEL,
             blank(dashScopeProperties.model()) ? "qwen3.6-35b-a3b" : dashScopeProperties.model(),
             "DashScope OpenAI-compatible",
             blank(dashScopeProperties.baseUrl())

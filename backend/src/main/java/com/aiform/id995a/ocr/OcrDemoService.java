@@ -73,10 +73,10 @@ public class OcrDemoService {
         ))
         .toList();
     EngineStatus status = new EngineStatus(
-        extraction.model() + " multimodal structured extraction",
+        modelProfile.label(),
         false,
         List.of(
-            "Rendered " + responsePages.size() + " page snapshot(s) and extracted structured JSON with " + extraction.model() + ".",
+            "Rendered " + responsePages.size() + " page snapshot(s) and extracted structured JSON with " + modelProfile.label() + ".",
             "Rendered page snapshots were sent directly to the multimodal LLM to find fields and filled regions; no preset field list or manual template coordinate boxes were used.",
             "Field names, filled values, checkbox selections, signatures, confidence, and optional field-region snapshots come from the multimodal LLM result only."
         )

@@ -11,6 +11,12 @@ import {
   cropPlaceholderText
 } from './ocrPresentation.js'
 import { pageProgressItems, recognitionProgressState } from './progressState.js'
+import {
+  extractionModeDisplayLabel,
+  LOCAL_MODEL_LABEL,
+  modelDisplayLabel,
+  normalizeModelOptions
+} from './modelDisplay.js'
 
 const apiBase = import.meta.env.VITE_API_BASE || ''
 const runtimeState = getRuntimeState()
@@ -60,11 +66,12 @@ const globalFieldConclusion = computed(() => documentFieldConclusion(response.va
 const selectedModel = computed(() => {
   return modelOptions.value.find((model) => model.id === selectedModelId.value) || modelOptions.value[0] || null
 })
-const selectedModelLabel = computed(() => selectedModel.value?.label || 'Qwen3.6-35B-A3B 视觉结构化')
+const selectedModelLabel = computed(() => modelDisplayLabel(selectedModel.value, LOCAL_MODEL_LABEL))
 const selectedModelUnavailableReason = computed(() => {
   if (!selectedModel.value || selectedModel.value.available !== false) return ''
   return selectedModel.value.unavailableReason || '该模型未配置 API Key'
 })
+const responseExtractionMode = computed(() => extractionModeDisplayLabel(response.value))
 const currentPageFieldSections = computed(() => {
   const groups = new Map()
   for (const row of currentPageFieldRows.value) {
@@ -174,7 +181,7 @@ async function fetchModelOptions() {
     if (!result.ok) throw new Error(`HTTP ${result.status}`)
     const payload = await result.json()
     const models = Array.isArray(payload.models) ? payload.models : []
-    modelOptions.value = models.length ? models : fallbackModelOptions()
+    modelOptions.value = models.length ? normalizeModelOptions(models) : fallbackModelOptions()
     ensureSelectedModel(payload.defaultModelId)
   } catch {
     modelOptions.value = fallbackModelOptions()
@@ -196,7 +203,7 @@ function fallbackModelOptions() {
   return [
     {
       id: 'local-qwen3.6-35b-a3b',
-      label: 'Qwen3.6-35B-A3B 视觉结构化',
+      label: LOCAL_MODEL_LABEL,
       model: 'Qwen3.6-35B-A3B',
       provider: 'OpenAI-compatible local gateway',
       available: true,
@@ -386,9 +393,9 @@ onBeforeUnmount(() => {
   <main class="ocr-app">
     <header class="app-header">
       <div class="brand-block">
-        <p class="eyebrow">Full-page LLM Demo</p>
+        <p class="eyebrow">Full-page OCR Demo</p>
         <h1>申请材料整页结构化识别演示</h1>
-        <p class="header-copy">PDF 或图片按整页送入多模态大模型，右侧展示自动生成的结构化 JSON。</p>
+        <p class="header-copy">识别材料，右侧分页展示结构化识别结果。</p>
       </div>
       <div class="model-pill">
         <label for="llm-model-select">识别模型</label>
@@ -463,7 +470,7 @@ onBeforeUnmount(() => {
         </div>
 
         <button v-else class="primary-action" type="button" :disabled="!file || !!selectedModelUnavailableReason" @click="submitOcr">
-          开始 LLM 识别
+          开始识别
         </button>
         <p v-if="error" class="error-text">{{ error }}</p>
       </div>
@@ -477,7 +484,7 @@ onBeforeUnmount(() => {
           <span>{{ response.pageCount }} 页</span>
         </div>
         <div class="toolbar-actions">
-          <span class="status-chip">{{ response.engineStatus?.extractionMode || response.model }}</span>
+          <span class="status-chip">{{ responseExtractionMode }}</span>
           <button class="secondary-action" type="button" @click="reset">重新上传</button>
         </div>
       </div>

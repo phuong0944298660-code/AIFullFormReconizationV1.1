@@ -47,10 +47,10 @@ class OcrControllerTest {
         .andExpect(jsonPath("$.defaultModelId", equalTo("local-qwen3.6-35b-a3b")))
         .andExpect(jsonPath("$.models", hasSize(2)))
         .andExpect(jsonPath("$.models[0].id", equalTo("local-qwen3.6-35b-a3b")))
-        .andExpect(jsonPath("$.models[0].label", equalTo("Qwen3.6-35B-A3B 视觉结构化")))
+        .andExpect(jsonPath("$.models[0].label", equalTo("本地模型")))
         .andExpect(jsonPath("$.models[0].available", equalTo(true)))
         .andExpect(jsonPath("$.models[1].id", equalTo("dashscope-qwen3.6-35b-a3b")))
-        .andExpect(jsonPath("$.models[1].label", equalTo("Qwen3.6-35B-A3B（官方原生）")))
+        .andExpect(jsonPath("$.models[1].label", equalTo("云原生模型")))
         .andExpect(jsonPath("$.models[1].model", equalTo("qwen3.6-35b-a3b")))
         .andExpect(jsonPath("$.models[1].available", equalTo(true)));
   }
@@ -78,7 +78,22 @@ class OcrControllerTest {
         .andExpect(jsonPath("$.pages[0].structuredFields[0].ocrStatus", equalTo("not_run")))
         .andExpect(jsonPath("$.pages[0].structuredFields[0].characters[0].status", equalTo("ok")))
         .andExpect(jsonPath("$.extractedFields", hasSize(0)))
+        .andExpect(jsonPath("$.engineStatus.extractionMode", equalTo("本地模型")))
         .andExpect(jsonPath("$.engineStatus.messages[1]", equalTo("Rendered page snapshots were sent directly to the multimodal LLM to find fields and filled regions; no preset field list or manual template coordinate boxes were used.")));
+  }
+
+  @Test
+  void uploadsDocumentAndReturnsCloudNativeModelDisplayName() throws Exception {
+    MockMultipartFile file = new MockMultipartFile(
+        "file",
+        "id988a.png",
+        "image/png",
+        Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4XmP4z8AAAAMBAQD3A0FDAAAAAElFTkSuQmCC")
+    );
+
+    mockMvc.perform(multipart("/api/ocr").file(file).param("modelId", "dashscope-qwen3.6-35b-a3b"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.engineStatus.extractionMode", equalTo("云原生模型")));
   }
 
   @Test

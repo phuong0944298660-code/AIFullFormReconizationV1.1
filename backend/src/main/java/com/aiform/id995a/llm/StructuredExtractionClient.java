@@ -482,7 +482,7 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
   private LlmModelProfile defaultProfile() {
     return new LlmModelProfile(
         LlmModelRegistry.DEFAULT_MODEL_ID,
-        "Qwen3.6-35B-A3B 视觉结构化",
+        LlmModelRegistry.DEFAULT_MODEL_LABEL,
         blank(properties.model()) ? "Qwen3.6-35B-A3B" : properties.model(),
         "OpenAI-compatible local gateway",
         blank(properties.baseUrl()) ? DEFAULT_BASE_URL : properties.baseUrl(),

@@ -32,6 +32,25 @@ test('field extraction view does not render OCR model comparison status', () => 
   assert.doesNotMatch(app, /OCR模型|OCR妯/)
 })
 
+test('frontend fallback model labels use local and cloud-native display names', () => {
+  assert.match(app, /label:\s*LOCAL_MODEL_LABEL/)
+  assert.match(app, /normalizeModelOptions\(models\)/)
+  assert.doesNotMatch(app, /Qwen3\.6-35B-A3B 视觉结构化/)
+  assert.doesNotMatch(app, /Qwen3\.6-35B-A3B（官方原生）/)
+})
+
+test('page header uses OCR demo copy', () => {
+  assert.match(app, />Full-page OCR Demo</)
+  assert.match(app, />识别材料，右侧分页展示结构化识别结果。</)
+  assert.doesNotMatch(app, />Full-page LLM Demo</)
+  assert.doesNotMatch(app, />PDF 或图片按整页送入多模态大模型，右侧展示自动生成的结构化 JSON。</)
+})
+
+test('primary upload action does not mention LLM', () => {
+  assert.match(app, />\s*开始识别\s*</)
+  assert.doesNotMatch(app, />\s*开始 LLM 识别\s*</)
+})
+
 test('demo result state is not reset by development hot updates', () => {
   assert.match(viteConfig, /hmr:\s*false/)
   assert.match(app, /__AIFULLFORMRECONIZATION_STATE__/)
