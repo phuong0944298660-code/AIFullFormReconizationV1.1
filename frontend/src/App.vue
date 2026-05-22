@@ -395,7 +395,7 @@ onBeforeUnmount(() => {
       <div class="brand-block">
         <p class="eyebrow">Full-page OCR Demo</p>
         <h1>申请材料整页结构化识别演示</h1>
-        <p class="header-copy">识别材料，右侧分页展示结构化识别结果。</p>
+        <p class="header-copy">识别材料，左侧展示每页快照，右侧对应展示结构化识别结果。</p>
       </div>
       <div class="model-pill">
         <label for="llm-model-select">识别模型</label>
