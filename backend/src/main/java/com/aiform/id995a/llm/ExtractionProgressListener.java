@@ -15,4 +15,6 @@ public interface ExtractionProgressListener {
   default void pageCompleted(int page) {}
 
   default void pageFailed(int page, String message) {}
+
+  default void postProcessingStep(String stage, String message, int progress) {}
 }

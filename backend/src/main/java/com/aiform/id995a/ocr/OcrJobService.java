@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -36,7 +37,20 @@ public class OcrJobService {
     String jobId = UUID.randomUUID().toString();
     OcrJobState state = new OcrJobState(jobId, ocrDemoService.normalizeFilename(filename));
     jobs.put(jobId, state);
-    executor.submit(() -> runJob(state, filename, contentType, fileBytes, modelId));
+    Future<?> future = executor.submit(() -> runJob(state, filename, contentType, fileBytes, modelId));
+    state.attachFuture(future);
+    return state.snapshot();
+  }
+
+  public OcrJobStatusResponse cancel(String jobId) {
+    OcrJobState state = jobs.get(jobId);
+    if (state == null) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "OCR job not found.");
+    }
+    Future<?> future = state.markCanceled();
+    if (future != null) {
+      future.cancel(true);
+    }
     return state.snapshot();
   }
 
@@ -52,6 +66,9 @@ public class OcrJobService {
     try {
       state.markRendering();
       List<RenderedOcrPage> pages = pageRenderer.render(filename, contentType, fileBytes);
+      if (state.isCanceled()) {
+        return;
+      }
       state.initializePages(pages);
       OcrDemoResponse result = ocrDemoService.recognizeRendered(
           state.filename(),
@@ -59,9 +76,16 @@ public class OcrJobService {
           state.progressListener(),
           modelId
       );
+      if (state.isCanceled()) {
+        return;
+      }
       state.markCompleted(result);
     } catch (IOException | RuntimeException exception) {
-      state.markFailed(exception.getMessage());
+      if (state.isCanceled()) {
+        state.markCanceled();
+      } else {
+        state.markFailed(exception.getMessage());
+      }
     }
   }
 
@@ -74,6 +98,8 @@ public class OcrJobService {
     private String message = "任务已创建，等待开始处理。";
     private String error = "";
     private OcrDemoResponse result;
+    private Future<?> future;
+    private int postProcessingProgress;
 
     private OcrJobState(String jobId, String filename) {
       this.jobId = jobId;
@@ -84,12 +110,29 @@ public class OcrJobService {
       return filename;
     }
 
+    private synchronized void attachFuture(Future<?> future) {
+      this.future = future;
+      if (isCanceled()) {
+        future.cancel(true);
+      }
+    }
+
+    private synchronized boolean isCanceled() {
+      return "canceled".equals(status);
+    }
+
     private synchronized void markRendering() {
+      if (isTerminal()) {
+        return;
+      }
       status = "rendering";
       message = "正在渲染源文件页面快照。";
     }
 
     private synchronized void initializePages(List<RenderedOcrPage> renderedPages) {
+      if (isTerminal()) {
+        return;
+      }
       pages.clear();
       renderedPages.stream()
           .sorted(Comparator.comparingInt(RenderedOcrPage::page))
@@ -132,10 +175,18 @@ public class OcrJobService {
         public void pageFailed(int page, String message) {
           OcrJobState.this.pageFailed(page, message);
         }
+
+        @Override
+        public void postProcessingStep(String stage, String message, int progress) {
+          OcrJobState.this.postProcessingStep(stage, message, progress);
+        }
       };
     }
 
     private synchronized void pageStarted(int page) {
+      if (isTerminal()) {
+        return;
+      }
       MutablePageProgress progress = pages.computeIfAbsent(
           page,
           key -> new MutablePageProgress(key, "pending", 0, "等待识别", "等待 Qwen 开始识别。")
@@ -155,6 +206,9 @@ public class OcrJobService {
     }
 
     private synchronized void pageAttemptStarted(int page, int attempt, String reason) {
+      if (isTerminal()) {
+        return;
+      }
       MutablePageProgress progress = pages.computeIfAbsent(
           page,
           key -> new MutablePageProgress(key, "pending", 0, "等待识别", "等待 Qwen 开始识别。")
@@ -174,6 +228,9 @@ public class OcrJobService {
     }
 
     private synchronized void pageAttemptCompleted(int page, int attempt, String reason, long elapsedMillis) {
+      if (isTerminal()) {
+        return;
+      }
       MutablePageProgress progress = pages.computeIfAbsent(
           page,
           key -> new MutablePageProgress(key, "pending", 0, "等待识别", "等待 Qwen 开始识别。")
@@ -188,6 +245,9 @@ public class OcrJobService {
     }
 
     private synchronized void pageAttemptFailed(int page, int attempt, String reason, long elapsedMillis, String failureMessage) {
+      if (isCanceled()) {
+        return;
+      }
       MutablePageProgress progress = pages.computeIfAbsent(
           page,
           key -> new MutablePageProgress(key, "pending", 0, "等待识别", "等待 Qwen 开始识别。")
@@ -204,6 +264,9 @@ public class OcrJobService {
     }
 
     private synchronized void pageCompleted(int page) {
+      if (isTerminal()) {
+        return;
+      }
       MutablePageProgress progress = pages.computeIfAbsent(
           page,
           key -> new MutablePageProgress(key, "pending", 0, "等待识别", "等待 Qwen 开始识别。")
@@ -220,6 +283,9 @@ public class OcrJobService {
     }
 
     private synchronized void pageFailed(int page, String failureMessage) {
+      if (isCanceled()) {
+        return;
+      }
       MutablePageProgress progress = pages.computeIfAbsent(
           page,
           key -> new MutablePageProgress(key, "pending", 0, "等待识别", "等待 Qwen 开始识别。")
@@ -237,7 +303,21 @@ public class OcrJobService {
       markFailedIfAllPagesTerminal();
     }
 
+    private synchronized void postProcessingStep(String stage, String stepMessage, int progressPercent) {
+      if (isTerminal()) {
+        return;
+      }
+      status = "post_processing";
+      postProcessingProgress = clampPostProcessingProgress(progressPercent);
+      message = stepMessage == null || stepMessage.isBlank()
+          ? "正在复核识别结果。"
+          : stepMessage;
+    }
+
     private synchronized void markCompleted(OcrDemoResponse completedResult) {
+      if (isTerminal()) {
+        return;
+      }
       result = completedResult;
       for (MutablePageProgress page : pages.values()) {
         if (!"failed".equals(page.status) && !"completed".equals(page.status)) {
@@ -256,11 +336,35 @@ public class OcrJobService {
     }
 
     private synchronized void markFailed(String failureMessage) {
+      if (isCanceled()) {
+        return;
+      }
       status = "failed";
       error = failureMessage == null || failureMessage.isBlank()
           ? "OCR job failed."
           : failureMessage;
       message = error;
+    }
+
+    private synchronized Future<?> markCanceled() {
+      if ("completed".equals(status) || "failed".equals(status)) {
+        return future;
+      }
+      status = "canceled";
+      error = "";
+      result = null;
+      message = "识别任务已取消。";
+      for (MutablePageProgress page : pages.values()) {
+        if (!"completed".equals(page.status) && !"failed".equals(page.status)) {
+          page.status = "canceled";
+          page.percent = 100;
+          page.stage = "已取消";
+          page.completedAtNanos = System.nanoTime();
+          page.currentAttemptStartedAtNanos = 0;
+          page.message = "第 " + page.page + " 页识别已取消。";
+        }
+      }
+      return future;
     }
 
     private synchronized OcrJobStatusResponse snapshot() {
@@ -316,10 +420,16 @@ public class OcrJobService {
       if ("failed".equals(status)) {
         return pageProgressPercent(pageSnapshots);
       }
+      if ("canceled".equals(status)) {
+        return 100;
+      }
+      if ("post_processing".equals(status)) {
+        return clampPostProcessingProgress(postProcessingProgress);
+      }
       if (pageSnapshots.isEmpty()) {
         return 0;
       }
-      return pageProgressPercent(pageSnapshots);
+      return Math.min(99, pageProgressPercent(pageSnapshots));
     }
 
     private int pageProgressPercent(List<OcrJobPageProgress> pageSnapshots) {
@@ -346,6 +456,14 @@ public class OcrJobService {
         case "empty_retry" -> "空结果重试";
         default -> reason == null || reason.isBlank() ? "请求" : reason;
       };
+    }
+
+    private boolean isTerminal() {
+      return "completed".equals(status) || "failed".equals(status) || "canceled".equals(status);
+    }
+
+    private static int clampPostProcessingProgress(int progress) {
+      return Math.max(0, Math.min(99, progress));
     }
 
     private static String formatDuration(long elapsedMillis) {

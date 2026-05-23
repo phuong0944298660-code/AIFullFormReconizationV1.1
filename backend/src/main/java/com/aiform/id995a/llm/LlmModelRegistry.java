@@ -10,8 +10,10 @@ public class LlmModelRegistry {
 
   public static final String DEFAULT_MODEL_ID = "local-qwen3.6-35b-a3b";
   public static final String DASHSCOPE_MODEL_ID = "dashscope-qwen3.6-35b-a3b";
+  public static final String DASHSCOPE_PLUS_MODEL_ID = "dashscope-qwen3.6-plus";
   public static final String DEFAULT_MODEL_LABEL = "本地模型";
   public static final String DASHSCOPE_MODEL_LABEL = "云原生模型";
+  public static final String DASHSCOPE_PLUS_MODEL_LABEL = "qwen3.6-plus";
 
   private final LlmProperties llmProperties;
   private final DashScopeProperties dashScopeProperties;
@@ -64,6 +66,19 @@ public class LlmModelRegistry {
             DASHSCOPE_MODEL_ID,
             DASHSCOPE_MODEL_LABEL,
             blank(dashScopeProperties.model()) ? "qwen3.6-35b-a3b" : dashScopeProperties.model(),
+            "DashScope OpenAI-compatible",
+            blank(dashScopeProperties.baseUrl())
+                ? "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                : dashScopeProperties.baseUrl(),
+            dashScopeProperties.apiKey(),
+            dashScopeProperties.enableThinking(),
+            false,
+            blank(dashScopeProperties.apiKey()) ? "缺少 DASHSCOPE_API_KEY" : ""
+        ),
+        new LlmModelProfile(
+            DASHSCOPE_PLUS_MODEL_ID,
+            DASHSCOPE_PLUS_MODEL_LABEL,
+            "qwen3.6-plus",
             "DashScope OpenAI-compatible",
             blank(dashScopeProperties.baseUrl())
                 ? "https://dashscope.aliyuncs.com/compatible-mode/v1"

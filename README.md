@@ -32,22 +32,38 @@ The legacy Baidu OCR settings remain in the backend configuration for optional e
 ## Local Run
 
 ```cmd
-run-demo.cmd
+start-local.cmd
 ```
 
-Or start the services separately:
+This starts the standard local ports used by the current demo:
+
+- Frontend: `http://127.0.0.1:5186/`
+- Backend: `http://127.0.0.1:18083`
+- Field OCR sidecar: `http://127.0.0.1:18092`
+
+It also packages the backend jar, stops stale processes on those ports, loads `llm.local.cmd`, writes logs under `logs/`, and records PIDs in `tmp/local-services.json`.
+
+Stop the local services with:
+
+```cmd
+stop-local.cmd
+```
+
+Or start the services separately for low-level debugging:
 
 ```cmd
 cd backend
-mvn spring-boot:run
+mvn -DskipTests package
+set SERVER_PORT=18083
+java -jar target\baidu-full-page-ocr-backend-0.1.0.jar
 ```
 
 ```cmd
 cd frontend
-npm run dev
+npx vite --host 127.0.0.1 --port 5186 --strictPort
 ```
 
-Open `http://127.0.0.1:5184`. The backend runs on `http://127.0.0.1:18081`.
+Open `http://127.0.0.1:5186`. The backend runs on `http://127.0.0.1:18083`.
 
 ## Verification
 

@@ -63,6 +63,20 @@ class StructuredExtractionClientTest {
     assertThat(payload.toString()).contains("Use true/false only for a standalone checkbox");
     assertThat(payload.toString()).contains("3名成人");
     assertThat(payload.toString()).contains("applicant-written number");
+    assertThat(payload.toString()).contains("Do not correct, complete, normalize, or infer handwritten values");
+    assertThat(payload.toString()).contains("visible mial");
+    assertThat(payload.toString()).contains("not mail, hotmail, gmail, yahoo");
+    assertThat(payload.toString()).contains("distinguish F from T by strokes");
+    assertThat(payload.toString()).contains("Do not assume the prefix from the form type");
+    assertThat(payload.toString()).contains("excluded_marks");
+    assertThat(payload.toString()).contains("If smudged, crossed-out, erased, or correction marks are mixed into a filled value");
+    assertThat(payload.toString()).contains("treat those marks as not filled");
+    assertThat(payload.toString()).contains("Separate servant room");
+    assertThat(payload.toString()).contains("Return the selected option text exactly as visible");
+    assertThat(payload.toString()).contains("Particulars of household members");
+    assertThat(payload.toString()).contains("return every visible cell in that row");
+    assertThat(payload.toString()).contains("HK identity card no. Yes/No rows");
+    assertThat(payload.toString()).contains("禁止纠正、补全、规范化、按常识推断手写值");
   }
 
   @Test
@@ -122,6 +136,107 @@ class StructuredExtractionClientTest {
     assertThat(httpClient.lastRequest().uri().toString())
         .isEqualTo("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
     assertThat(httpClient.lastRequest().headers().firstValue("Authorization")).contains("Bearer dashscope-key");
+  }
+
+  @Test
+  void transcribesFieldCropsWithExactAddressNumberInstructions() throws Exception {
+    StubHttpClient httpClient = new StubHttpClient(jsonResponse("""
+        {"results":[{"page":1,"path":"correspondence_address","text":"香港中環德輔道中NO88號國金中心二期2802室","address_number_fragment":"NO88","confidence":92,"status":"ok"}]}
+        """));
+    StructuredExtractionClient client = new StructuredExtractionClient(
+        new LlmProperties(true, "https://apie.zhisuaninfo.com/v1", "test-key", "Qwen3.6-35B-A3B", 4096, 60, 4),
+        httpClient,
+        objectMapper
+    );
+
+    List<FieldCropTranscriptionResult> results = client.transcribeFieldCrops(
+        "sample.pdf",
+        List.of(new FieldCropTranscriptionRequest(
+            1,
+            "correspondence_address",
+            "Correspondence address",
+            "香港中環德輔道中168號國金中心二期2802室",
+            new byte[] {1, 2, 3},
+            "data:image/jpeg;base64,crop123"
+        )),
+        new LlmModelProfile(
+            "local-qwen3.6-35b-a3b",
+            "本地模型",
+            "Qwen3.6-35B-A3B",
+            "OpenAI-compatible local gateway",
+            "https://apie.zhisuaninfo.com/v1",
+            "test-key",
+            false,
+            true,
+            ""
+        )
+    );
+
+    JsonNode payload = objectMapper.readTree(httpClient.lastRequestBody());
+    String requestText = payload.toString();
+    assertThat(results).hasSize(1);
+    assertThat(results.get(0).text()).isEqualTo("香港中環德輔道中NO88號國金中心二期2802室");
+    assertThat(results.get(0).addressNumberFragment()).isEqualTo("NO88");
+    assertThat(payload.path("messages").get(1).path("content").get(1).path("image_url").path("url").asText())
+        .isEqualTo("data:image/jpeg;base64,crop123");
+    assertThat(requestText).contains("Transcribe only the visible applicant-filled value");
+    assertThat(requestText).contains("Do not correct, complete, normalize, or infer");
+    assertThat(requestText).contains("if the visible handwriting reads mial");
+    assertThat(requestText).contains("do not change it to mail, hotmail, gmail, or yahoo");
+    assertThat(requestText).contains("employment contract number");
+    assertThat(requestText).contains("distinguish uppercase F from T");
+    assertThat(requestText).contains("Do not assume a prefix");
+    assertThat(requestText).contains("do not drop year digits such as 2026");
+    assertThat(requestText).contains("If a crossed-out, smudged, erased, or correction mark appears anywhere");
+    assertThat(requestText).contains("before, between, over, or after normal characters");
+    assertThat(requestText).contains("Checkbox/option rows");
+    assertThat(requestText).contains("clear intentional selection mark");
+    assertThat(requestText).contains("Preserve address number prefixes such as No, NO, no, N0 exactly");
+    assertThat(requestText).contains("For address crops, read every visible applicant-filled address line");
+    assertThat(requestText).contains("do not stop after the first line");
+    assertThat(requestText).contains("copy every visible digit after No");
+    assertThat(requestText).contains("Exclude smudged, crossed-out, erased, or correction marks");
+    assertThat(requestText).contains("excluded_marks");
+    assertThat(requestText).contains("current_first_pass_value");
+  }
+
+  @Test
+  void parsesExcludedMarksFromFieldCropTranscriptionResponse() throws Exception {
+    StubHttpClient httpClient = new StubHttpClient(jsonResponse("""
+        {"results":[{"page":1,"path":"address","text":"No88","address_number_fragment":"No88","excluded_marks":[{"text":"X","reason":"smudged"}],"confidence":91,"status":"ok"}]}
+        """));
+    StructuredExtractionClient client = new StructuredExtractionClient(
+        new LlmProperties(true, "https://apie.zhisuaninfo.com/v1", "test-key", "Qwen3.6-35B-A3B", 4096, 60, 4),
+        httpClient,
+        objectMapper
+    );
+
+    List<FieldCropTranscriptionResult> results = client.transcribeFieldCrops(
+        "sample.pdf",
+        List.of(new FieldCropTranscriptionRequest(
+            1,
+            "address",
+            "Address",
+            "NoX88",
+            new byte[] {1},
+            "data:image/jpeg;base64,crop123"
+        )),
+        new LlmModelProfile(
+            "local-qwen3.6-35b-a3b",
+            "local",
+            "Qwen3.6-35B-A3B",
+            "OpenAI-compatible local gateway",
+            "https://apie.zhisuaninfo.com/v1",
+            "test-key",
+            false,
+            true,
+            ""
+        )
+    );
+
+    assertThat(results).hasSize(1);
+    assertThat(results.get(0).excludedMarks().get(0).path("text").asText()).isEqualTo("X");
+    assertThat(results.get(0).excludedMarks().get(0).path("reason").asText()).isEqualTo("smudged");
   }
 
   @Test
@@ -358,6 +473,7 @@ class StructuredExtractionClientTest {
     private final List<?> outcomes;
     private final AtomicInteger sendCount = new AtomicInteger();
     private final AtomicReference<HttpRequest> lastRequest = new AtomicReference<>();
+    private final AtomicReference<String> lastRequestBody = new AtomicReference<>();
 
     private StubHttpClient(String body) {
       this(List.of(body));
@@ -373,6 +489,10 @@ class StructuredExtractionClientTest {
 
     private HttpRequest lastRequest() {
       return lastRequest.get();
+    }
+
+    private String lastRequestBody() {
+      return lastRequestBody.get();
     }
 
     @Override
@@ -429,6 +549,7 @@ class StructuredExtractionClientTest {
     public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler)
         throws java.io.IOException {
       lastRequest.set(request);
+      lastRequestBody.set(readBody(request));
       int index = sendCount.getAndIncrement();
       Object outcome = outcomes.get(Math.min(index, outcomes.size() - 1));
       if (outcome instanceof java.io.IOException exception) {
@@ -436,6 +557,12 @@ class StructuredExtractionClientTest {
       }
       String body = (String) outcome;
       return (HttpResponse<T>) new StubHttpResponse(request, body);
+    }
+
+    private String readBody(HttpRequest request) {
+      BodyCaptureSubscriber subscriber = new BodyCaptureSubscriber();
+      request.bodyPublisher().ifPresent(publisher -> publisher.subscribe(subscriber));
+      return subscriber.body();
     }
 
     @Override
@@ -457,6 +584,32 @@ class StructuredExtractionClientTest {
         return CompletableFuture.completedFuture(send(request, responseBodyHandler));
       } catch (Exception exception) {
         return CompletableFuture.failedFuture(exception);
+      }
+    }
+
+    private static final class BodyCaptureSubscriber implements java.util.concurrent.Flow.Subscriber<java.nio.ByteBuffer> {
+      private final java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+
+      @Override
+      public void onSubscribe(java.util.concurrent.Flow.Subscription subscription) {
+        subscription.request(Long.MAX_VALUE);
+      }
+
+      @Override
+      public void onNext(java.nio.ByteBuffer item) {
+        byte[] bytes = new byte[item.remaining()];
+        item.get(bytes);
+        output.write(bytes, 0, bytes.length);
+      }
+
+      @Override
+      public void onError(Throwable throwable) {}
+
+      @Override
+      public void onComplete() {}
+
+      private String body() {
+        return output.toString(java.nio.charset.StandardCharsets.UTF_8);
       }
     }
   }

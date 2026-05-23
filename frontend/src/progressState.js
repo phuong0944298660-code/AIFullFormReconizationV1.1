@@ -37,6 +37,7 @@ export function currentJobPage(jobStatus) {
 function stageText(status, active) {
   if (status?.status === 'completed') return '识别完成'
   if (status?.status === 'failed') return '识别失败'
+  if (status?.status === 'post_processing') return status.message || '正在复核识别结果'
   if (status?.status === 'rendering') return '渲染页面快照'
   if (active?.status === 'running') return `Page ${active.page} 识别中`
   if (status?.pageCount > 0) return '等待页面识别'
@@ -46,6 +47,7 @@ function stageText(status, active) {
 function detailText(status, active) {
   if (status?.status === 'completed') return '全部页面已完成，正在展示识别结果。'
   if (status?.status === 'failed') return status.error || status.message || '识别任务失败。'
+  if (status?.status === 'post_processing') return status.message || '正在复核识别结果。'
   if (active?.status === 'running') {
     const diagnostic = activeDetailDiagnostic(active)
     return `${active.message || `正在识别第 ${active.page} 页。`}${diagnostic} 已完成 ${status.completedPages || 0} / ${status.pageCount || 0} 页。`

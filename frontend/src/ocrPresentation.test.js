@@ -131,13 +131,14 @@ test('responseJsonPreview compacts nested image data urls before rendering JSON 
   assert.ok(preview.length < 2000)
 })
 
-test('pageStructuredFieldCount counts leaf fields including null values', () => {
+test('pageStructuredFieldCount ignores null and blank leaf fields', () => {
   const count = pageStructuredFieldCount({
     structuredData: {
       page_1: {
         part_1: {
           selected_type: '(a)',
-          visa_type: null
+          visa_type: null,
+          blank_note: ''
         },
         part_2: {
           surname_en: 'CHAN'
@@ -149,7 +150,7 @@ test('pageStructuredFieldCount counts leaf fields including null values', () => 
     }
   }, 1)
 
-  assert.equal(count, 3)
+  assert.equal(count, 2)
 })
 
 test('no_applicant_input marker is not counted or rendered as a visible field', () => {
@@ -187,16 +188,15 @@ test('structuredFieldRows flattens page JSON into field extraction rows', () => 
     }
   }, 1)
 
-  assert.equal(rows.length, 5)
+  assert.equal(rows.length, 4)
   assert.equal(rows[0].fieldName, 'surname en')
   assert.equal(rows[0].displayValue, 'HIDAYATI')
   assert.equal(rows[0].confidence, 91)
-  assert.equal(rows[1].displayValue, '未填写')
-  assert.equal(rows[2].displayValue, '已勾选')
-  assert.equal(rows[3].displayValue, '未勾选')
-  assert.equal(rows[4].displayValue, '已签名，未识别出签名文字')
-  assert.equal(rows[4].rawValue, 'present')
-  assert.equal(typeof rows[4].confidence, 'number')
+  assert.equal(rows[1].displayValue, '已勾选')
+  assert.equal(rows[2].displayValue, '未勾选')
+  assert.equal(rows[3].displayValue, '已签名，未识别出签名文字')
+  assert.equal(rows[3].rawValue, 'present')
+  assert.equal(typeof rows[3].confidence, 'number')
 })
 
 test('structuredFieldRows renders yes-no option booleans as selected option meaning', () => {
@@ -296,6 +296,152 @@ test('structuredFieldRows keeps LLM fields without OCR model status', () => {
   assert.equal(rows[0].charSegments.every((segment) => segment.reviewFlag === false), true)
 })
 
+test('structuredFieldRows hides backend LLM fields that have no applicant value', () => {
+  const rows = structuredFieldRows({
+    pages: [
+      {
+        page: 1,
+        structuredFields: [
+          {
+            page: 1,
+            path: 'empty_address',
+            label: 'empty address',
+            value: null,
+            displayValue: '未填写',
+            confidence: 98,
+            bbox: [1, 2, 3, 4],
+            snapshotDataUrl: 'data:image/jpeg;base64,crop',
+            characters: []
+          },
+          {
+            page: 1,
+            path: 'present_address',
+            label: 'present address',
+            value: 'Flat 7',
+            displayValue: 'Flat 7',
+            confidence: 98,
+            bbox: [],
+            snapshotDataUrl: '',
+            characters: []
+          }
+        ]
+      }
+    ],
+    structuredData: {}
+  }, 1)
+
+  assert.deepEqual(rows.map((row) => row.path), ['present_address'])
+})
+
+test('structuredFieldRows fills missing nested rows from structuredData when structuredFields are incomplete', () => {
+  const rows = structuredFieldRows({
+    pages: [
+      {
+        page: 2,
+        structuredFields: [
+          {
+            page: 2,
+            path: 'household_members.1.hk_identity_card_no',
+            label: 'HK identity card no. (if any)',
+            value: 'S 663289(7)',
+            displayValue: 'S 663289(7)',
+            confidence: 95,
+            bbox: [1, 2, 3, 4],
+            snapshotDataUrl: 'data:image/jpeg;base64,crop',
+            characters: []
+          }
+        ]
+      }
+    ],
+    structuredData: {
+      page_2: {
+        household_members: [
+          {
+            name: '梁靖娴',
+            year_of_birth: '1981',
+            relationship_with_the_employer: '本人',
+            hk_identity_card_no: 'S 663289(7)'
+          },
+          {
+            name: '黄志辉',
+            year_of_birth: '1978',
+            relationship_with_the_employer: '夫妻',
+            hk_identity_card_no: 'J 778431(0)'
+          }
+        ]
+      }
+    }
+  }, 2)
+
+  assert.deepEqual(rows.map((row) => row.path), [
+    'household_members.1.name',
+    'household_members.1.year_of_birth',
+    'household_members.1.relationship_with_the_employer',
+    'household_members.1.hk_identity_card_no',
+    'household_members.2.name',
+    'household_members.2.year_of_birth',
+    'household_members.2.relationship_with_the_employer',
+    'household_members.2.hk_identity_card_no'
+  ])
+})
+
+test('structuredFieldRows keeps footer fields after working experience rows by visual page order', () => {
+  const rows = structuredFieldRows({
+    pages: [
+      {
+        page: 2,
+        structuredFields: [
+          {
+            page: 2,
+            path: 'date',
+            label: 'Date',
+            value: '20/4/2026',
+            displayValue: '20/4/2026',
+            confidence: 90,
+            bbox: [900, 3180, 1300, 3260],
+            snapshotDataUrl: 'data:image/jpeg;base64,date',
+            characters: []
+          },
+          {
+            page: 2,
+            path: 'signature_of_applicant',
+            label: 'Signature of applicant',
+            value: 'Siti Nurhaliza',
+            displayValue: 'Siti Nurhaliza',
+            confidence: 95,
+            bbox: [1400, 3160, 2100, 3260],
+            snapshotDataUrl: 'data:image/jpeg;base64,signature',
+            characters: []
+          }
+        ]
+      }
+    ],
+    structuredData: {
+      page_2: {
+        date: '20/4/2026',
+        signature_of_applicant: 'Siti Nurhaliza',
+        working_experience_as_a_domestic_helper: [
+          {
+            name_of_employer: 'Mrs. Linda CHEN',
+            address: 'Flat 5A, 12/F, Park View',
+            period_from: '06/19',
+            period_to: '05/22'
+          }
+        ]
+      }
+    }
+  }, 2)
+
+  assert.deepEqual(rows.map((row) => row.path), [
+    'working_experience_as_a_domestic_helper.1.name_of_employer',
+    'working_experience_as_a_domestic_helper.1.address',
+    'working_experience_as_a_domestic_helper.1.period_from',
+    'working_experience_as_a_domestic_helper.1.period_to',
+    'date',
+    'signature_of_applicant'
+  ])
+})
+
 test('structuredFieldRows displays applicant-written household counts instead of binary flags', () => {
   const rows = structuredFieldRows({
     pages: [
@@ -379,15 +525,15 @@ test('documentFieldConclusion summarizes confidence distribution across all page
       {
         page: 1,
         structuredFields: [
-          { confidence: 95 },
-          { confidence: 88 }
+          { value: 'A', confidence: 95 },
+          { value: 'B', confidence: 88 }
         ]
       },
       {
         page: 2,
         structuredFields: [
-          { confidence: 84 },
-          { confidence: 63 }
+          { value: 'C', confidence: 84 },
+          { value: 'D', confidence: 63 }
         ]
       }
     ]
@@ -429,6 +575,24 @@ test('recognitionProgressState uses backend job progress instead of elapsed-time
   assert.match(state.detail, /第 2 次请求/)
   assert.match(state.detail, /总耗时 1分24秒/)
   assert.match(state.detail, /本次 12秒/)
+})
+
+test('recognitionProgressState shows backend post-processing progress', () => {
+  const state = recognitionProgressState({
+    status: 'post_processing',
+    pageCount: 2,
+    completedPages: 2,
+    progress: 86,
+    message: 'crop review is running',
+    pages: [
+      { page: 1, status: 'completed', percent: 100 },
+      { page: 2, status: 'completed', percent: 100 }
+    ]
+  })
+
+  assert.equal(state.percent, 86)
+  assert.equal(state.stage, 'crop review is running')
+  assert.equal(state.detail, 'crop review is running')
 })
 
 test('pageProgressItems labels each backend-reported page status', () => {

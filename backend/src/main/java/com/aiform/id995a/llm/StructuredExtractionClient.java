@@ -27,7 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
-public class StructuredExtractionClient implements StructuredExtractionGateway {
+public class StructuredExtractionClient implements StructuredExtractionGateway, FieldCropTranscriptionGateway {
 
   private static final String DEFAULT_BASE_URL = "https://apie.zhisuaninfo.com/v1";
 
@@ -222,6 +222,31 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
     return buildRequestPayload(filename, pages, false, pages.size(), profile == null ? defaultProfile() : profile);
   }
 
+  @Override
+  public List<FieldCropTranscriptionResult> transcribeFieldCrops(
+      String filename,
+      List<FieldCropTranscriptionRequest> crops,
+      LlmModelProfile modelProfile
+  ) throws IOException {
+    if (crops == null || crops.isEmpty()) {
+      return List.of();
+    }
+    LlmModelProfile profile = modelProfile == null ? defaultProfile() : modelProfile;
+    if (blank(profile.apiKey())) {
+      throw new IOException("Missing LLM API key. Set LLM_API_KEY.");
+    }
+    try {
+      ExtractionResponse response = sendExtractionRequest(
+          buildFieldCropTranscriptionPayload(filename, crops, profile),
+          profile
+      );
+      return parseFieldCropTranscriptionResults(response.data(), crops);
+    } catch (InterruptedException exception) {
+      Thread.currentThread().interrupt();
+      throw new IOException("LLM crop transcription request interrupted.", exception);
+    }
+  }
+
   private JsonNode buildRequestPayload(
       String filename,
       List<RenderedOcrPage> pages,
@@ -261,6 +286,100 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
     }
 
     return root;
+  }
+
+  private JsonNode buildFieldCropTranscriptionPayload(
+      String filename,
+      List<FieldCropTranscriptionRequest> crops,
+      LlmModelProfile profile
+  ) {
+    ObjectNode root = objectMapper.createObjectNode();
+    root.put("model", blank(profile.model()) ? "Qwen3.6-35B-A3B" : profile.model());
+    root.put("temperature", 0);
+    root.put("max_tokens", Math.max(1024, Math.min(properties.maxTokens(), 4096)));
+    root.put("stream", false);
+    root.put("enable_thinking", profile.enableThinking());
+    ObjectNode chatTemplateOptions = root.putObject("chat_template_kwargs");
+    chatTemplateOptions.put("enable_thinking", profile.enableThinking());
+    ObjectNode responseFormat = root.putObject("response_format");
+    responseFormat.put("type", "json_object");
+
+    ArrayNode messages = root.putArray("messages");
+    ObjectNode systemMessage = messages.addObject();
+    systemMessage.put("role", "system");
+    systemMessage.put("content", "You are an exact field-crop transcription engine. Return valid JSON only.");
+
+    ObjectNode userMessage = messages.addObject();
+    userMessage.put("role", "user");
+    ArrayNode content = userMessage.putArray("content");
+    ObjectNode text = content.addObject();
+    text.put("type", "text");
+    text.put("text", buildFieldCropTranscriptionPrompt(filename, crops));
+
+    for (FieldCropTranscriptionRequest crop : crops) {
+      ObjectNode image = content.addObject();
+      image.put("type", "image_url");
+      ObjectNode imageUrl = image.putObject("image_url");
+      imageUrl.put("url", crop.cropImageDataUrl());
+      imageUrl.put("detail", "high");
+    }
+
+    return root;
+  }
+
+  private String buildFieldCropTranscriptionPrompt(String filename, List<FieldCropTranscriptionRequest> crops) {
+    StringBuilder builder = new StringBuilder();
+    builder.append("Transcribe only the visible applicant-filled value in each attached field crop.\n");
+    builder.append("Do not correct, complete, normalize, or infer from common knowledge, addresses, phone/email patterns, or nearby context.\n");
+    builder.append("Exclude smudged, crossed-out, erased, or correction marks from text. Treat those marks as not filled; do not use them to infer missing characters. Report visible rejected marks in excluded_marks.\n");
+    builder.append("If a crossed-out, smudged, erased, or correction mark appears anywhere in or near a field value, before, between, over, or after normal characters, do not transcribe it as a letter, digit, punctuation, checkbox selection, or any part of the filled value. Preserve the adjacent normal filled characters exactly and report only the rejected mark in excluded_marks.\n");
+    builder.append("For email, phone, fax, date, ID, passport, reference number, employment contract number, amount, and name crops, copy only visible characters exactly. Preserve visible punctuation and symbols such as @ . _ - / ( ) without inserting missing symbols by format rules.\n");
+    builder.append("For email addresses, transcribe the local part and domain literally. Do not normalize unusual domain text: if the visible handwriting reads mial, hotmial, or yahooo, keep that exact sequence and do not change it to mail, hotmail, gmail, or yahoo.\n");
+    builder.append("For long email crops, inspect characters immediately before and after @, hyphens, and dots; do not drop narrow visible letters such as l or i before a hyphen or dot.\n");
+    builder.append("For employment contract numbers and other serial/reference numbers, distinguish uppercase F from T by visible strokes. A glyph with a vertical left stem plus top and middle horizontal strokes is F, not T. Inspect the full IDN year segment carefully and do not drop year digits such as 2026. Do not assume a prefix from document type or nearby printed text.\n");
+    builder.append("Checkbox/option rows: return the selected option text only when there is a clear intentional selection mark such as a tick, check, cross, or filled box. If the checkbox area contains only a scribble, smudge, crossed-out mark, correction mark, erased ink, or ambiguous accidental ink, return text as an empty string, status as blank, and put the rejected mark in excluded_marks.\n");
+    builder.append("Preserve address number prefixes such as No, NO, no, N0 exactly as visible before digits. A visible NO88 must remain NO88; do not convert it to 168, 188, 88號, or any plausible street number.\n");
+    builder.append("For address crops, read every visible applicant-filled address line inside the same field box from top to bottom; do not stop after the first line. Preserve lower lines with estate/building/floor/room text exactly when visible.\n");
+    builder.append("For No/NO/no/N0 followed by digits in an address, copy every visible digit after No, including narrow trailing digits such as 3.\n");
+    builder.append("If characters are ambiguous, keep the visible ambiguous characters and lower confidence instead of replacing them with a likely value.\n");
+    builder.append("Return JSON only in this schema: {\"results\":[{\"page\":1,\"path\":\"field_path\",\"text\":\"exact visible value after excluding rejected marks\",\"address_number_fragment\":\"NO88 or blank\",\"excluded_marks\":[{\"text\":\"rejected mark\",\"reason\":\"smudged|crossed_out|erased|correction\"}],\"confidence\":0-100,\"status\":\"ok|unclear|blank\"}]}.\n");
+    builder.append("source_file: ").append(filename == null || filename.isBlank() ? "uploaded-document" : filename).append('\n');
+    builder.append("Crops are provided in this exact order:\n");
+    for (int index = 0; index < crops.size(); index += 1) {
+      FieldCropTranscriptionRequest crop = crops.get(index);
+      builder.append(index + 1)
+          .append(". page=").append(crop.page())
+          .append(", path=").append(crop.path())
+          .append(", label=").append(crop.label())
+          .append(", current_first_pass_value=").append(crop.currentValue())
+          .append('\n');
+    }
+    return builder.toString();
+  }
+
+  private List<FieldCropTranscriptionResult> parseFieldCropTranscriptionResults(
+      JsonNode data,
+      List<FieldCropTranscriptionRequest> requests
+  ) {
+    JsonNode results = data == null ? null : data.path("results");
+    if (results == null || !results.isArray()) {
+      return List.of();
+    }
+    List<FieldCropTranscriptionResult> values = new ArrayList<>();
+    for (int index = 0; index < Math.min(results.size(), requests.size()); index += 1) {
+      JsonNode item = results.get(index);
+      FieldCropTranscriptionRequest request = requests.get(index);
+      values.add(new FieldCropTranscriptionResult(
+          item.path("page").asInt(request.page()),
+          item.path("path").asText(request.path()),
+          firstExistingText(item, "text", "transcription", "value"),
+          firstExistingText(item, "address_number_fragment", "number_fragment", "fragment"),
+          normalizeConfidence(item.path("confidence").asDouble(0)),
+          item.path("status").asText("ok"),
+          item.path("excluded_marks")
+      ));
+    }
+    return List.copyOf(values);
   }
 
   private ExtractionResponse sendExtractionRequest(JsonNode payload, LlmModelProfile profile) throws IOException, InterruptedException {
@@ -353,11 +472,21 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
     builder.append("- Also include a top-level _field_evidence object mirroring page/field paths. For each leaf field, include label and value_bbox as normalized {x,y,width,height} coordinates for the filled area on that page image.\n");
     builder.append("- _field_evidence.page_N must be keyed by exact page_N field paths. Never put label/value_bbox directly under _field_evidence.page_N as one whole-page evidence object.\n");
     builder.append("- Example: {\"page_2\":{\"present_address\":\"Flat 7\"},\"_field_evidence\":{\"page_2\":{\"present_address\":{\"label\":\"Present address\",\"value_bbox\":{\"x\":0.20,\"y\":0.10,\"width\":0.55,\"height\":0.09}}}}}.\n");
-    builder.append("- For filled handwritten, typed, or signature text, include char_confidences only for ambiguous or low-confidence characters: [{char,index,confidence,bbox}], where bbox is normalized inside the field value_bbox. Do not list every character when the value is clear; field value_bbox is enough.\n");
+    builder.append("- For filled handwritten, typed, or signature text, include char_confidences only for ambiguous, low-confidence, smudged, crossed-out, erased, or correction characters: [{char,index,confidence,status,reason,bbox}], where bbox is normalized inside the field value_bbox. Do not list every character when the value is clear; field value_bbox is enough.\n");
     builder.append("- Each leaf field value must be the applicant-filled value; if a major visible field is blank, use null.\n");
+    builder.append("- For handwritten or typed applicant-filled values, copy only visible characters exactly as written. Do not correct, complete, normalize, or infer handwritten values from common knowledge, official addresses, names, phone/email patterns, or surrounding context. 禁止纠正、补全、规范化、按常识推断手写值. If a character or digit is unclear, keep the ambiguous visible text as-is with low confidence and char_confidences; do not replace it with a plausible value.\n");
+    builder.append("- For email addresses, copy the visible local part and domain literally. Do not normalize or correct unusual domain text: visible mial, hotmial, yahooo, or similar nonstandard sequences must remain exactly as written, not mail, hotmail, gmail, yahoo, or another common provider.\n");
+    builder.append("- For employment contract numbers and other serial/reference numbers, transcribe visible uppercase letters and digits exactly. Carefully distinguish F from T by strokes: vertical left stem plus top and middle horizontal strokes means F, not T. Do not assume the prefix from the form type or nearby printed contract text.\n");
+    builder.append("- If smudged, crossed-out, erased, or correction marks are mixed into a filled value, exclude those marks from the field value and treat those marks as not filled. Do not use them to infer missing characters. Put them only in _field_evidence.page_N.<field>.excluded_marks as [{text,reason,bbox,index,length}] when visible.\n");
+    builder.append("- If a crossed-out, smudged, erased, or correction mark appears anywhere in or near a field value, before, between, over, or after normal characters, do not transcribe it as a letter, digit, punctuation, checkbox selection, or any part of the filled value. Preserve the adjacent normal filled characters exactly and record only the rejected mark in excluded_marks.\n");
+    builder.append("- If a filling area contains only smudges, crossed-out text, erased text, or correction marks, return null for that field and record the rejected marks in excluded_marks. If both an old crossed-out value and a newer clear value are visible, return only the newer clear intended value.\n");
+    builder.append("- For checkbox/option rows, count a selection only when the box has a clear intentional tick/check/cross/fill. A scribble, smudge, crossed-out mark, correction mark, erased ink, or ambiguous accidental ink near or inside a checkbox must be treated as not selected and not filled; return null and record it in excluded_marks.\n");
+    builder.append("- Do not omit compact selected Yes/No option groups near filled fields, such as Separate servant room / 獨立工人房 / 独立工人房, and average monthly household income no less than HK$15,000. Return the selected option text exactly as visible, for example 有, Yes, 沒有, or No.\n");
+    builder.append("- For table sections such as Particulars of household members, if any row contains applicant-filled handwriting or typed text, return every visible cell in that row, including name, year of birth, relationship with the employer, and HK identity card no. Do not collapse the table to only one column.\n");
     builder.append("- If the page has no applicant-filled handwriting, typed values, selected checkboxes, signatures, photos, or other applicant input, return {\"page_N\":{\"no_applicant_input\":true}} for that page. In this case _field_evidence is not required for that page.\n");
     builder.append("- Ignore template instructions, empty borders, empty lines, barcodes, page numbers, and smudges/corrections that are not intended field values.\n");
     builder.append("- For checkbox option groups on the same row or in the same question, such as 有/没有, Yes/No, Male/Female, Married/Single, do not create one boolean field per option. Create one field named by the row/question label and set its value to the selected option text, for example {\"pillow\":\"没有\"}, {\"water_supply\":\"有\"}, {\"sex\":\"Female\"}. Use null only when no option in that group is selected.\n");
+    builder.append("- For HK identity card no. Yes/No rows, return the selected option text under hk_identity_card_no when no ID number is written, for example \"No\" when the No checkbox is selected.\n");
     builder.append("- Use true/false only for a standalone checkbox whose field label itself is the option statement, and name that field with checked/is_selected when the value is a checkbox state.\n");
     builder.append("- For handwritten quantity/count fill-ins embedded in printed labels, such as \"3名成人\", \"1名小孩\", \"0家庭成员需要经常照料\", set the field value to the applicant-written number (3, 1, 0). Do not output 1/0 as a presence flag unless the field itself is a standalone checkbox state.\n");
     builder.append("- For signatures, transcribe the visible handwritten signature text as the field value when readable. Do not return present for signatures. If a signature mark exists but the text cannot be read, use \"illegible_signature\"; otherwise use null.\n");
@@ -466,6 +595,24 @@ public class StructuredExtractionClient implements StructuredExtractionGateway {
       return DEFAULT_BASE_URL;
     }
     return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+  }
+
+  private String firstExistingText(JsonNode node, String... keys) {
+    if (node == null || node.isMissingNode() || node.isNull()) {
+      return "";
+    }
+    for (String key : keys) {
+      JsonNode value = node.path(key);
+      if (!value.isMissingNode() && !value.isNull()) {
+        return value.asText("");
+      }
+    }
+    return "";
+  }
+
+  private double normalizeConfidence(double value) {
+    double normalized = value <= 1 ? value * 100 : value;
+    return Math.max(0, Math.min(100, Math.round(normalized)));
   }
 
   private boolean blank(String value) {

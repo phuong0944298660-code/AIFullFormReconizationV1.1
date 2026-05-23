@@ -28,8 +28,8 @@ ocr:
     probability: ${BAIDU_OCR_PROBABILITY:false}
     char-probability: ${BAIDU_OCR_CHAR_PROBABILITY:false}
     multidirectional-recognize: ${BAIDU_OCR_MULTIDIRECTIONAL_RECOGNIZE:false}
-    pdf-dpi: ${BAIDU_OCR_PDF_DPI:160}
-    max-image-long-side: ${OCR_PAGE_MAX_IMAGE_LONG_SIDE:1600}
+    pdf-dpi: ${BAIDU_OCR_PDF_DPI:240}
+    max-image-long-side: ${OCR_PAGE_MAX_IMAGE_LONG_SIDE:0}
 
 llm:
   enabled: ${LLM_ENABLED:true}

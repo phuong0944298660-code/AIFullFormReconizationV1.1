@@ -22,20 +22,22 @@ import org.springframework.stereotype.Component;
 @Component
 public class BaiduOcrPageRenderer {
 
+  public static final float DEFAULT_RENDER_DPI = 240f;
+
   private final float renderDpi;
   private final int maxImageLongSide;
 
   @Autowired
   public BaiduOcrPageRenderer(
-      @Value("${ocr.baidu.pdf-dpi:200}") float renderDpi,
-      @Value("${ocr.baidu.max-image-long-side:1600}") int maxImageLongSide
+      @Value("${ocr.baidu.pdf-dpi:240}") float renderDpi,
+      @Value("${ocr.baidu.max-image-long-side:0}") int maxImageLongSide
   ) {
     this.renderDpi = Math.max(120f, renderDpi);
-    this.maxImageLongSide = Math.max(900, maxImageLongSide);
+    this.maxImageLongSide = maxImageLongSide <= 0 ? 0 : Math.max(900, maxImageLongSide);
   }
 
   public BaiduOcrPageRenderer(float renderDpi) {
-    this(renderDpi, 1600);
+    this(renderDpi, 0);
   }
 
   public List<RenderedOcrPage> render(String filename, String contentType, byte[] fileBytes) throws IOException {
@@ -78,6 +80,9 @@ public class BaiduOcrPageRenderer {
 
   private BufferedImage resizeIfNeeded(BufferedImage image) {
     int longSide = Math.max(image.getWidth(), image.getHeight());
+    if (maxImageLongSide <= 0) {
+      return image;
+    }
     if (longSide <= maxImageLongSide) {
       return image;
     }

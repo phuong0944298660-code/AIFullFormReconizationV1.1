@@ -107,12 +107,16 @@ public class StructuredFieldEvidenceService {
       return;
     }
     if (isLeafValue(node)) {
-      candidates.add(new FieldCandidate(path, node));
+      if (hasApplicantValue(node)) {
+        candidates.add(new FieldCandidate(path, node));
+      }
       return;
     }
     if (isMetadataLeaf(node)) {
       JsonNode value = node.has("value") ? node.path("value") : node.path("text");
-      candidates.add(new FieldCandidate(path, value));
+      if (hasApplicantValue(value)) {
+        candidates.add(new FieldCandidate(path, value));
+      }
       return;
     }
     if (node.isArray()) {
@@ -137,6 +141,13 @@ public class StructuredFieldEvidenceService {
 
   private boolean isLeafValue(JsonNode node) {
     return node.isNull() || node.isTextual() || node.isBoolean() || node.isNumber();
+  }
+
+  private boolean hasApplicantValue(JsonNode node) {
+    if (node == null || node.isMissingNode() || node.isNull()) {
+      return false;
+    }
+    return !node.isTextual() || !node.asText("").isBlank();
   }
 
   private boolean isMetadataLeaf(JsonNode node) {
@@ -265,33 +276,8 @@ public class StructuredFieldEvidenceService {
   }
 
   private CropResult crop(RenderedOcrPage page, List<Integer> bbox) {
-    if (bbox.size() < 4 || page.pngBytes().length == 0) {
-      return new CropResult(new byte[0], "");
-    }
-    try {
-      BufferedImage source = ImageIO.read(new ByteArrayInputStream(page.pngBytes()));
-      if (source == null) {
-        return new CropResult(new byte[0], "");
-      }
-      int left = Math.max(0, bbox.get(0) - 4);
-      int top = Math.max(0, bbox.get(1) - 4);
-      int right = Math.min(source.getWidth(), bbox.get(2) + 4);
-      int bottom = Math.min(source.getHeight(), bbox.get(3) + 4);
-      if (right <= left || bottom <= top) {
-        return new CropResult(new byte[0], "");
-      }
-      BufferedImage crop = source.getSubimage(left, top, right - left, bottom - top);
-      BufferedImage rgb = new BufferedImage(crop.getWidth(), crop.getHeight(), BufferedImage.TYPE_INT_RGB);
-      Graphics2D graphics = rgb.createGraphics();
-      graphics.drawImage(crop, 0, 0, null);
-      graphics.dispose();
-      ByteArrayOutputStream output = new ByteArrayOutputStream();
-      ImageIO.write(rgb, "jpg", output);
-      byte[] bytes = output.toByteArray();
-      return new CropResult(bytes, "data:image/jpeg;base64," + java.util.Base64.getEncoder().encodeToString(bytes));
-    } catch (IOException | RuntimeException exception) {
-      return new CropResult(new byte[0], "");
-    }
+    FieldCropper.CropResult crop = FieldCropper.crop(page, bbox, FieldCropper.CropKind.SNAPSHOT);
+    return new CropResult(crop.bytes(), crop.dataUrl());
   }
 
   private List<FieldCharacterEvidence> characters(JsonNode evidence, String valueText, List<Integer> bbox) {
@@ -306,8 +292,9 @@ public class StructuredFieldEvidenceService {
         JsonNode node = index < charNodes.size() ? charNodes.get(index) : NullNode.getInstance();
         String text = firstExisting(node, "char", "text", "value").asText(values.get(index));
         double confidence = node.isMissingNode() ? 100 : normalizeConfidence(firstExisting(node, "confidence", "score").asDouble(100));
+        String status = characterStatus(node);
         List<Integer> charBbox = parseCharacterBbox(node, bbox, index, values.size());
-        characters.add(new FieldCharacterEvidence(index, text, confidence, "ok", charBbox, ""));
+        characters.add(new FieldCharacterEvidence(index, text, confidence, status, charBbox, ""));
       }
       return List.copyOf(characters);
     }
@@ -316,6 +303,18 @@ public class StructuredFieldEvidenceService {
       characters.add(new FieldCharacterEvidence(index, values.get(index), 100, "ok", approximateCharBbox(bbox, index, values.size()), ""));
     }
     return List.copyOf(characters);
+  }
+
+  private String characterStatus(JsonNode node) {
+    if (node == null || node.isMissingNode() || node.isNull()) {
+      return "ok";
+    }
+    String status = firstExisting(node, "status", "state").asText("");
+    if (!status.isBlank()) {
+      return status;
+    }
+    String reason = firstExisting(node, "reason", "mark_type", "type").asText("");
+    return reason.isBlank() ? "ok" : reason;
   }
 
   private List<Integer> parseCharacterBbox(JsonNode node, List<Integer> fieldBbox, int index, int total) {

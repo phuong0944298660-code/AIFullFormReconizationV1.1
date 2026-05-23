@@ -7,6 +7,7 @@ import com.aiform.id995a.ocr.OcrDemoService;
 import com.aiform.id995a.ocr.OcrJobService;
 import com.aiform.id995a.ocr.OcrJobStatusResponse;
 import java.io.IOException;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -55,5 +56,10 @@ public class OcrController {
   @GetMapping("/ocr/jobs/{jobId}")
   public OcrJobStatusResponse recognizeJobStatus(@PathVariable String jobId) {
     return ocrJobService.status(jobId);
+  }
+
+  @DeleteMapping("/ocr/jobs/{jobId}")
+  public OcrJobStatusResponse cancelRecognizeJob(@PathVariable String jobId) {
+    return ocrJobService.cancel(jobId);
   }
 }

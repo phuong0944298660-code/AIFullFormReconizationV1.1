@@ -56,20 +56,79 @@ export function responseJsonPreview(response) {
 }
 
 export function pageStructuredFieldCount(response, pageNumber) {
-  const evidenceRows = pageStructuredFields(response, pageNumber)
-  if (evidenceRows.length) return evidenceRows.length
-  const pageData = response?.structuredData?.[`page_${pageNumber}`]
-  return countLeafFields(pageData)
+  return structuredFieldRows(response, pageNumber).length
 }
 
 export function structuredFieldRows(response, pageNumber) {
   const evidenceRows = pageStructuredFields(response, pageNumber)
-  if (evidenceRows.length) return evidenceRows.map(toEvidenceFieldRow)
   const pageData = response?.structuredData?.[`page_${pageNumber}`]
   const confidenceData = confidencePageData(response, pageNumber)
-  const rows = []
-  collectFieldRows(pageData, [], rows, confidenceData)
+  const fallbackRows = []
+  collectFieldRows(pageData, [], fallbackRows, confidenceData)
+  const visibleFallbackRows = fallbackRows.filter(isVisibleFieldRow)
+  if (!evidenceRows.length) return sortStructuredRows(visibleFallbackRows)
+  const visibleEvidenceRows = evidenceRows.map(toEvidenceFieldRow).filter(isVisibleFieldRow)
+  if (!visibleFallbackRows.length) return sortStructuredRows(visibleEvidenceRows)
+  const evidenceByPath = new Map(visibleEvidenceRows.map((row) => [row.path, row]))
+  const mergedRows = visibleFallbackRows.map((row) => evidenceByPath.get(row.path) || row)
+  for (const row of visibleEvidenceRows) {
+    if (!visibleFallbackRows.some((fallbackRow) => fallbackRow.path === row.path)) {
+      mergedRows.push(row)
+    }
+  }
+  return sortStructuredRows(mergedRows)
+}
+
+function sortStructuredRows(rows = []) {
+  const indexed = rows.map((row, index) => ({ row, index }))
+  const footerRows = indexed.filter(({ row }) => isFooterFieldRow(row))
+  const workingRows = indexed.filter(({ row }) => isWorkingExperienceRow(row))
+  if (footerRows.length && workingRows.length) {
+    return [
+      ...indexed.filter(({ row }) => !isFooterFieldRow(row)).map(({ row }) => row),
+      ...footerRows
+        .sort((left, right) => visualBboxSortKey(left.row, left.index) - visualBboxSortKey(right.row, right.index))
+        .map(({ row }) => row)
+    ]
+  }
+  if (indexed.length >= 2 && indexed.every(({ row }) => hasUsableBbox(row))) {
+    return indexed
+      .sort((left, right) => visualBboxSortKey(left.row, left.index) - visualBboxSortKey(right.row, right.index))
+      .map(({ row }) => row)
+  }
   return rows
+}
+
+function visualBboxSortKey(row, index) {
+  if (!hasUsableBbox(row)) return Number.MAX_SAFE_INTEGER - index
+  const bbox = row.bbox.map((value) => Number(value))
+  const maxCoord = Math.max(...bbox.map((value) => Math.abs(value)))
+  const rowBandSize = maxCoord <= 1 ? 0.02 : maxCoord < 500 ? 1 : 80
+  const rowBand = Math.round(bbox[1] / rowBandSize)
+  return rowBand * 100000 + bbox[0]
+}
+
+function hasUsableBbox(row) {
+  return Array.isArray(row?.bbox)
+    && row.bbox.length === 4
+    && row.bbox.every((value) => Number.isFinite(Number(value)))
+    && Number(row.bbox[2]) > Number(row.bbox[0])
+    && Number(row.bbox[3]) > Number(row.bbox[1])
+}
+
+function isWorkingExperienceRow(row) {
+  const text = `${row?.path || ''} ${row?.section || ''} ${row?.fieldName || ''}`.toLowerCase()
+  return text.includes('working_experience') || text.includes('working experience')
+}
+
+function isFooterFieldRow(row) {
+  const path = String(row?.path || '').toLowerCase()
+  const label = String(row?.fieldName || '').toLowerCase()
+  return path === 'date'
+    || path === 'signature_of_applicant'
+    || path.endsWith('.signature_of_applicant')
+    || label === 'date'
+    || label === 'signature of applicant'
 }
 
 export function fieldIssueRegions(response, pageNumber) {
@@ -181,7 +240,10 @@ function compactPreviewString(value) {
 
 function countLeafFields(value) {
   if (value === null || value === undefined) {
-    return value === null ? 1 : 0
+    return 0
+  }
+  if (typeof value === 'string' && value.trim() === '') {
+    return 0
   }
   if (Array.isArray(value)) {
     return value.reduce((total, item) => total + countLeafFields(item), 0)
@@ -196,8 +258,10 @@ function countLeafFields(value) {
 
 function collectFieldRows(value, path, rows, confidenceData) {
   if (value === undefined) return
+  if (!hasApplicantRawValue(value)) return
   if (isMetadataObject(value)) {
     const valueNode = Object.hasOwn(value, 'value') ? value.value : value.text
+    if (!hasApplicantRawValue(valueNode)) return
     rows.push(toFieldRow(path, valueNode, value.confidence ?? lookupConfidence(confidenceData, path)))
     return
   }
@@ -215,6 +279,16 @@ function collectFieldRows(value, path, rows, confidenceData) {
     return
   }
   rows.push(toFieldRow(path, value, lookupConfidence(confidenceData, path)))
+}
+
+function isVisibleFieldRow(row) {
+  return hasApplicantRawValue(row?.rawValue)
+}
+
+function hasApplicantRawValue(value) {
+  if (value === null || value === undefined) return false
+  if (typeof value === 'string') return value.trim() !== ''
+  return true
 }
 
 function isControlField(key) {

@@ -192,6 +192,63 @@ class StructuredFieldEvidenceServiceTest {
     assertThat(details.get(4)).isEmpty();
   }
 
+  @Test
+  void omitsNullAndBlankFieldsWhenBuildingVisibleFieldDetails() throws Exception {
+    StructuredFieldEvidenceService service = new StructuredFieldEvidenceService();
+    JsonNode structuredData = objectMapper.readTree("""
+        {
+          "page_1": {
+            "filled_name": "ALICE",
+            "empty_address": null,
+            "blank_note": "",
+            "negative_answer": false
+          }
+        }
+        """);
+
+    Map<Integer, List<StructuredFieldDetail>> details = service.buildFieldDetails(
+        structuredData,
+        List.of(new RenderedOcrPage(1, "", 200, 200))
+    );
+
+    assertThat(details.get(1))
+        .extracting(StructuredFieldDetail::path)
+        .containsExactly("filled_name", "negative_answer");
+  }
+
+  @Test
+  void preservesCharacterStatusFromFieldEvidence() throws Exception {
+    StructuredFieldEvidenceService service = new StructuredFieldEvidenceService();
+    JsonNode structuredData = objectMapper.readTree("""
+        {
+          "page_1": {
+            "name": "AB"
+          },
+          "_field_evidence": {
+            "page_1": {
+              "name": {
+                "label": "Name",
+                "value_bbox": [20, 20, 80, 40],
+                "char_confidences": [
+                  {"char": "A", "index": 0, "confidence": 96, "status": "ok"},
+                  {"char": "B", "index": 1, "confidence": 20, "status": "smudged"}
+                ]
+              }
+            }
+          }
+        }
+        """);
+
+    Map<Integer, List<StructuredFieldDetail>> details = service.buildFieldDetails(
+        structuredData,
+        List.of(renderedPage())
+    );
+
+    assertThat(details.get(1).get(0).characters())
+        .extracting(FieldCharacterEvidence::status)
+        .containsExactly("ok", "smudged");
+  }
+
   private RenderedOcrPage renderedPage() throws Exception {
     BufferedImage image = new BufferedImage(200, 200, BufferedImage.TYPE_INT_RGB);
     Graphics2D graphics = image.createGraphics();

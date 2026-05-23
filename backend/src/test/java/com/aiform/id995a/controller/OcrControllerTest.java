@@ -45,14 +45,18 @@ class OcrControllerTest {
     mockMvc.perform(get("/api/llm/models"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.defaultModelId", equalTo("local-qwen3.6-35b-a3b")))
-        .andExpect(jsonPath("$.models", hasSize(2)))
+        .andExpect(jsonPath("$.models", hasSize(3)))
         .andExpect(jsonPath("$.models[0].id", equalTo("local-qwen3.6-35b-a3b")))
         .andExpect(jsonPath("$.models[0].label", equalTo("本地模型")))
         .andExpect(jsonPath("$.models[0].available", equalTo(true)))
         .andExpect(jsonPath("$.models[1].id", equalTo("dashscope-qwen3.6-35b-a3b")))
         .andExpect(jsonPath("$.models[1].label", equalTo("云原生模型")))
         .andExpect(jsonPath("$.models[1].model", equalTo("qwen3.6-35b-a3b")))
-        .andExpect(jsonPath("$.models[1].available", equalTo(true)));
+        .andExpect(jsonPath("$.models[1].available", equalTo(true)))
+        .andExpect(jsonPath("$.models[2].id", equalTo("dashscope-qwen3.6-plus")))
+        .andExpect(jsonPath("$.models[2].label", equalTo("qwen3.6-plus")))
+        .andExpect(jsonPath("$.models[2].model", equalTo("qwen3.6-plus")))
+        .andExpect(jsonPath("$.models[2].available", equalTo(true)));
   }
 
   @Test
@@ -74,7 +78,7 @@ class OcrControllerTest {
         .andExpect(jsonPath("$.pages[0].blocks", hasSize(0)))
         .andExpect(jsonPath("$.structuredData.page_1.part_2_personal_particulars.surname_en", equalTo("CHAN")))
         .andExpect(jsonPath("$.structuredData.page_1.part_2_personal_particulars.alias").doesNotExist())
-        .andExpect(jsonPath("$.pages[0].structuredFields", hasSize(2)))
+        .andExpect(jsonPath("$.pages[0].structuredFields", hasSize(1)))
         .andExpect(jsonPath("$.pages[0].structuredFields[0].ocrStatus", equalTo("not_run")))
         .andExpect(jsonPath("$.pages[0].structuredFields[0].characters[0].status", equalTo("ok")))
         .andExpect(jsonPath("$.extractedFields", hasSize(0)))
@@ -94,6 +98,20 @@ class OcrControllerTest {
     mockMvc.perform(multipart("/api/ocr").file(file).param("modelId", "dashscope-qwen3.6-35b-a3b"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.engineStatus.extractionMode", equalTo("云原生模型")));
+  }
+
+  @Test
+  void uploadsDocumentAndReturnsQwenPlusModelDisplayName() throws Exception {
+    MockMultipartFile file = new MockMultipartFile(
+        "file",
+        "id988a.png",
+        "image/png",
+        Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4XmP4z8AAAAMBAQD3A0FDAAAAAElFTkSuQmCC")
+    );
+
+    mockMvc.perform(multipart("/api/ocr").file(file).param("modelId", "dashscope-qwen3.6-plus"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.engineStatus.extractionMode", equalTo("qwen3.6-plus")));
   }
 
   @Test

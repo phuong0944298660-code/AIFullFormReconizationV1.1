@@ -110,9 +110,10 @@ function onDrop(event) {
   setFile(event.dataTransfer.files?.[0])
 }
 
-function setFile(selected) {
+async function setFile(selected) {
   if (!selected) return
   activeRunId += 1
+  await cancelActiveJob()
   file.value = selected
   response.value = null
   activePage.value = 1
@@ -130,6 +131,7 @@ function openFilePicker() {
 
 async function submitOcr() {
   if (!file.value || loading.value) return
+  await cancelActiveJob()
   loading.value = true
   error.value = ''
   response.value = null
@@ -222,6 +224,9 @@ async function pollJobUntilComplete(jobId, runId) {
     if (runId !== activeRunId) break
     applyJobStatus(status)
     if (status.status === 'completed') return status
+    if (status.status === 'canceled') {
+      throw new Error(status.message || '识别任务已取消。')
+    }
     if (status.status === 'failed') {
       throw new Error(status.error || status.message || '识别任务失败。')
     }
@@ -259,7 +264,7 @@ async function restoreLastJob() {
       applyCompletedJob(status, runId)
       return
     }
-    if (status.status === 'failed') {
+    if (status.status === 'failed' || status.status === 'canceled') {
       clearLastJobId()
       return
     }
@@ -327,8 +332,9 @@ function characterTitle(segment) {
   return reasons.join('；')
 }
 
-function reset() {
+async function reset() {
   activeRunId += 1
+  await cancelActiveJob()
   file.value = null
   response.value = null
   activePage.value = 1
@@ -356,6 +362,17 @@ function rememberJobId(jobId) {
 
 function clearLastJobId() {
   activeJobId.value = ''
+}
+
+async function cancelActiveJob() {
+  const jobId = activeJobId.value
+  if (!jobId) return
+  clearLastJobId()
+  try {
+    await fetch(`${apiBase}/api/ocr/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+  } catch {
+    // Cancellation is best effort; the next run should not be blocked by it.
+  }
 }
 
 function getRuntimeState() {

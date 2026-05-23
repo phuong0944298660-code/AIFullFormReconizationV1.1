@@ -41,7 +41,7 @@ test('frontend fallback model labels use local and cloud-native display names', 
 
 test('page header uses OCR demo copy', () => {
   assert.match(app, />Full-page OCR Demo</)
-  assert.match(app, />识别材料，右侧分页展示结构化识别结果。</)
+  assert.match(app, />识别材料，左侧展示每页快照，右侧对应展示结构化识别结果。</)
   assert.doesNotMatch(app, />Full-page LLM Demo</)
   assert.doesNotMatch(app, />PDF 或图片按整页送入多模态大模型，右侧展示自动生成的结构化 JSON。</)
 })
@@ -55,4 +55,18 @@ test('demo result state is not reset by development hot updates', () => {
   assert.match(viteConfig, /hmr:\s*false/)
   assert.match(app, /__AIFULLFORMRECONIZATION_STATE__/)
   assert.doesNotMatch(app, /sessionStorage/)
+})
+
+test('frontend dev server proxies API requests to the active backend port', () => {
+  assert.match(viteConfig, /port:\s*Number\(process\.env\.FRONTEND_PORT\s*\|\|\s*5186\)/)
+  assert.match(viteConfig, /backendOrigin\s*=\s*process\.env\.VITE_BACKEND_ORIGIN\s*\|\|\s*process\.env\.BACKEND_ORIGIN\s*\|\|\s*'http:\/\/127\.0\.0\.1:18083'/)
+  assert.match(viteConfig, /'\/api':\s*backendOrigin/)
+  assert.doesNotMatch(viteConfig, /localhost:18081/)
+})
+
+test('starting over cancels the previous backend OCR job', () => {
+  assert.match(app, /async function cancelActiveJob/)
+  assert.match(app, /fetch\(`\$\{apiBase\}\/api\/ocr\/jobs\/\$\{encodeURIComponent\(jobId\)\}`,\s*\{\s*method:\s*'DELETE'/s)
+  assert.match(app, /await cancelActiveJob\(\)/)
+  assert.match(app, /status\.status === 'canceled'/)
 })

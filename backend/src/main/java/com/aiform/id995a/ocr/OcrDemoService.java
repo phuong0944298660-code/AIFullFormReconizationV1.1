@@ -17,17 +17,32 @@ public class OcrDemoService {
   private final BaiduOcrPageRenderer pageRenderer;
   private final StructuredExtractionGateway structuredExtractionGateway;
   private final StructuredFieldEvidenceService structuredFieldEvidenceService;
+  private final AddressFieldCropRefinementService addressFieldCropRefinementService;
+  private final GeneralFieldCropRefinementService generalFieldCropRefinementService;
+  private final SelectionFieldCropRefinementService selectionFieldCropRefinementService;
+  private final DeclarationFooterFieldRefinementService declarationFooterFieldRefinementService;
+  private final SmudgedFieldValueFilterService smudgedFieldValueFilterService;
   private final LlmModelRegistry llmModelRegistry;
 
   public OcrDemoService(
       BaiduOcrPageRenderer pageRenderer,
       StructuredExtractionGateway structuredExtractionGateway,
       StructuredFieldEvidenceService structuredFieldEvidenceService,
+      AddressFieldCropRefinementService addressFieldCropRefinementService,
+      GeneralFieldCropRefinementService generalFieldCropRefinementService,
+      SelectionFieldCropRefinementService selectionFieldCropRefinementService,
+      DeclarationFooterFieldRefinementService declarationFooterFieldRefinementService,
+      SmudgedFieldValueFilterService smudgedFieldValueFilterService,
       LlmModelRegistry llmModelRegistry
   ) {
     this.pageRenderer = pageRenderer;
     this.structuredExtractionGateway = structuredExtractionGateway;
     this.structuredFieldEvidenceService = structuredFieldEvidenceService;
+    this.addressFieldCropRefinementService = addressFieldCropRefinementService;
+    this.generalFieldCropRefinementService = generalFieldCropRefinementService;
+    this.selectionFieldCropRefinementService = selectionFieldCropRefinementService;
+    this.declarationFooterFieldRefinementService = declarationFooterFieldRefinementService;
+    this.smudgedFieldValueFilterService = smudgedFieldValueFilterService;
     this.llmModelRegistry = llmModelRegistry;
   }
 
@@ -56,9 +71,41 @@ public class OcrDemoService {
   ) throws IOException {
     String normalizedFilename = normalizeFilename(filename);
     LlmModelProfile modelProfile = llmModelRegistry.resolve(modelId);
-    StructuredExtractionResult extraction = structuredExtractionGateway.extract(normalizedFilename, pages, progressListener, modelProfile);
+    ExtractionProgressListener listener = progressListener == null ? ExtractionProgressListener.NOOP : progressListener;
+    StructuredExtractionResult extraction = structuredExtractionGateway.extract(normalizedFilename, pages, listener, modelProfile);
+    listener.postProcessingStep("address_crop_review", "整页识别完成，正在复核地址字段。", 72);
+    AddressFieldCropRefinementResult refinedExtraction = addressFieldCropRefinementService.refine(
+        normalizedFilename,
+        extraction.data(),
+        pages,
+        modelProfile
+    );
+    listener.postProcessingStep("field_crop_review", "正在复核普通字段和符号敏感字段。", 80);
+    GeneralFieldCropRefinementResult refinedGeneralFields = generalFieldCropRefinementService.refine(
+        normalizedFilename,
+        refinedExtraction.data(),
+        pages,
+        modelProfile
+    );
+    listener.postProcessingStep("selection_crop_review", "正在复核勾选项和声明字段。", 88);
+    SelectionFieldCropRefinementResult refinedSelections = selectionFieldCropRefinementService.refine(
+        normalizedFilename,
+        refinedGeneralFields.data(),
+        pages,
+        modelProfile
+    );
+    listener.postProcessingStep("declaration_footer_review", "正在补充声明页日期和签名字段。", 92);
+    DeclarationFooterFieldRefinementResult refinedFooterFields = declarationFooterFieldRefinementService.refine(
+        normalizedFilename,
+        refinedSelections.data(),
+        pages,
+        modelProfile
+    );
+    listener.postProcessingStep("smudge_filter", "正在过滤涂抹、擦除和修正痕迹。", 96);
+    SmudgedFieldValueFilterResult filteredExtraction = smudgedFieldValueFilterService.filter(refinedFooterFields.data());
+    listener.postProcessingStep("field_evidence", "正在生成字段快照和展示结果。", 98);
     Map<Integer, List<StructuredFieldDetail>> fieldDetailsByPage =
-        structuredFieldEvidenceService.buildFieldDetails(extraction.data(), pages);
+        structuredFieldEvidenceService.buildFieldDetails(filteredExtraction.data(), pages);
     List<OcrPage> responsePages = pages.stream()
         .map(page -> new OcrPage(
             page.page(),
@@ -78,7 +125,11 @@ public class OcrDemoService {
         List.of(
             "Rendered " + responsePages.size() + " page snapshot(s) and extracted structured JSON with " + modelProfile.label() + ".",
             "Rendered page snapshots were sent directly to the multimodal LLM to find fields and filled regions; no preset field list or manual template coordinate boxes were used.",
-            "Field names, filled values, checkbox selections, signatures, confidence, and optional field-region snapshots come from the multimodal LLM result only."
+            "Address fields with clear value regions are second-pass transcribed from their field crop; updated fields: " + refinedExtraction.updated() + " / " + refinedExtraction.attempted() + ".",
+            "Ordinary text and symbol-sensitive fields with clear value regions are crop-reviewed by field type; updated fields: " + refinedGeneralFields.updated() + " / " + refinedGeneralFields.attempted() + ".",
+            "Checkbox and declaration fields with clear value regions are second-pass reviewed from their field crop; updated fields: " + refinedSelections.updated() + " / " + refinedSelections.attempted() + ".",
+            "Declaration page checkbox/date/signature fields are restored from fixed page crops when the page model misses them; updated fields: " + refinedFooterFields.updated() + " / " + refinedFooterFields.attempted() + ".",
+            "Smudged, crossed-out, erased, or correction marks mixed into field values are filtered as not filled; filtered fields: " + filteredExtraction.filtered() + "."
         )
     );
     return new OcrDemoResponse(
@@ -88,7 +139,7 @@ public class OcrDemoService {
         responsePages,
         List.of(),
         status,
-        extraction.data(),
+        filteredExtraction.data(),
         extraction.rawText()
     );
   }

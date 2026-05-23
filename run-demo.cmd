@@ -27,31 +27,9 @@ if "%LLM_API_KEY%%DASHSCOPE_API_KEY%"=="" (
 )
 
 echo.
-echo Starting LOCAL mode...
-echo   - OCR sidecar (PP-OCRv5 crop compare): http://127.0.0.1:18092
-echo   - Backend (Java + LLM)                : http://127.0.0.1:18081
-echo   - Frontend (Vue)                      : http://127.0.0.1:5184
+echo Starting LOCAL mode through start-local.cmd...
 echo.
-
-start "Field OCR Sidecar" /min "%~dp0ocr-service\run-dev.cmd"
-timeout /t 3 /nobreak >nul
-
-start "Full-page LLM Backend" /min "%~dp0backend\run-dev.cmd"
-timeout /t 5 /nobreak >nul
-
-start "Full-page LLM Frontend" /min "%~dp0frontend\run-dev.cmd"
-
-echo.
-echo Services are starting...
-echo Frontend : http://127.0.0.1:5184
-echo Backend  : http://127.0.0.1:18081/api/health
-echo OCR      : http://127.0.0.1:18092/health
-echo.
-echo Logs:
-echo   backend\backend-dev.out.log
-echo   ocr-service\ocr-service-dev.log
-echo   frontend\frontend-dev.out.log
-echo.
+"%~dp0start-local.cmd"
 goto end
 
 :docker
