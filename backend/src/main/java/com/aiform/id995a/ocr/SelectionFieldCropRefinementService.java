@@ -9,12 +9,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import javax.imageio.ImageIO;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -22,6 +25,23 @@ public class SelectionFieldCropRefinementService {
 
   private static final double MIN_BLANK_CONFIDENCE = 70;
   private static final double MIN_REPLACEMENT_CONFIDENCE = 85;
+  private static final double APPLICATION_TYPE_CONFIDENCE = 95;
+  private static final String APPLICATION_TYPE_ROOT = "application_type";
+  private static final String ENTRY_TO_HK_KEY = "entry_to_hong_kong_to_take_up_employment_as_a_domestic_helper_from_abroad";
+  private static final String CONTRACT_RENEWAL_KEY = "contract_renewal_with_the_same_employer_or_change_of_employer";
+  private static final String REMAINING_CONTRACT_KEY = "complete_the_remaining_extended_period_of_the_current_contract";
+  private static final String ENTRY_TO_HK_LABEL = "Entry to Hong Kong to take up employment as a domestic helper from abroad";
+  private static final String CONTRACT_RENEWAL_LABEL = "Contract renewal with the same employer or change of employer";
+  private static final String REMAINING_CONTRACT_LABEL = "Complete the remaining/extended period of the current contract";
+  private static final String ENTRY_VISA_VALUE = "entry visa";
+  private static final String ENTRY_VISA_AND_EXTENSION_VALUE = "entry visa AND Extension of Stay";
+  private static final String EXTENSION_OF_STAY_VALUE = "Extension of Stay";
+  private static final List<ApplicationTypeCheckbox> APPLICATION_TYPE_CHECKBOXES = List.of(
+      new ApplicationTypeCheckbox(ENTRY_TO_HK_KEY, ENTRY_TO_HK_LABEL, ENTRY_VISA_VALUE, 0.70, 0.275, 0.82, 0.335),
+      new ApplicationTypeCheckbox(CONTRACT_RENEWAL_KEY, CONTRACT_RENEWAL_LABEL, ENTRY_VISA_VALUE, 0.70, 0.350, 0.82, 0.405),
+      new ApplicationTypeCheckbox(CONTRACT_RENEWAL_KEY, CONTRACT_RENEWAL_LABEL, ENTRY_VISA_AND_EXTENSION_VALUE, 0.70, 0.410, 0.82, 0.470),
+      new ApplicationTypeCheckbox(REMAINING_CONTRACT_KEY, REMAINING_CONTRACT_LABEL, EXTENSION_OF_STAY_VALUE, 0.70, 0.475, 0.82, 0.535)
+  );
 
   private final FieldCropTranscriptionGateway transcriptionGateway;
   private final ObjectMapper objectMapper;
@@ -81,8 +101,9 @@ public class SelectionFieldCropRefinementService {
       addMissingHkIdentityCardNoCandidate(page, pageData, mutableData, requests, candidatesByKey);
     }
 
+    int updated = restoreApplicationTypeSelections(mutableData, pages);
     if (requests.isEmpty()) {
-      return new SelectionFieldCropRefinementResult(mutableData, 0, 0);
+      return new SelectionFieldCropRefinementResult(mutableData, 0, updated);
     }
 
     List<FieldCropTranscriptionResult> results;
@@ -92,7 +113,6 @@ public class SelectionFieldCropRefinementService {
       return new SelectionFieldCropRefinementResult(mutableData, requests.size(), 0);
     }
 
-    int updated = 0;
     for (FieldCropTranscriptionResult result : results == null ? List.<FieldCropTranscriptionResult>of() : results) {
       SelectionCandidate candidate = candidatesByKey.get(key(result.page(), result.path()));
       if (candidate == null) {
@@ -116,6 +136,139 @@ public class SelectionFieldCropRefinementService {
     }
 
     return new SelectionFieldCropRefinementResult(mutableData, requests.size(), updated);
+  }
+
+  private int restoreApplicationTypeSelections(ObjectNode mutableData, List<RenderedOcrPage> pages) {
+    RenderedOcrPage firstPage = firstPage(pages);
+    if (firstPage == null) {
+      return 0;
+    }
+    List<ApplicationTypeCheckbox> selected = selectedApplicationTypeCheckboxes(firstPage);
+    if (selected.isEmpty()) {
+      return 0;
+    }
+    Map<String, List<ApplicationTypeCheckbox>> selectedByField = new LinkedHashMap<>();
+    for (ApplicationTypeCheckbox checkbox : selected) {
+      selectedByField.computeIfAbsent(checkbox.fieldKey(), ignored -> new ArrayList<>()).add(checkbox);
+    }
+
+    String pageKey = "page_" + firstPage.page();
+    ObjectNode applicationType = objectChild(objectChild(mutableData, pageKey), APPLICATION_TYPE_ROOT);
+    int updated = 0;
+    for (String fieldKey : List.of(ENTRY_TO_HK_KEY, CONTRACT_RENEWAL_KEY, REMAINING_CONTRACT_KEY)) {
+      List<ApplicationTypeCheckbox> checkboxes = selectedByField.getOrDefault(fieldKey, List.of());
+      if (checkboxes.isEmpty()) {
+        continue;
+      }
+      String value = joinedSelectedValues(checkboxes);
+      String label = checkboxes.get(0).label();
+      List<Integer> bbox = unionBbox(checkboxes.stream()
+          .map(checkbox -> absoluteBbox(checkbox, firstPage.imageWidth(), firstPage.imageHeight()))
+          .toList());
+      applicationType.put(fieldKey, value);
+      setConfidence(mutableData, pageKey, List.of(APPLICATION_TYPE_ROOT, fieldKey), APPLICATION_TYPE_CONFIDENCE);
+      ObjectNode evidence = evidenceNode(mutableData, pageKey, List.of(APPLICATION_TYPE_ROOT, fieldKey));
+      evidence.put("label", label);
+      evidence.put("selection_crop_status", "detected");
+      evidence.put("selection_crop_confidence", Math.round(APPLICATION_TYPE_CONFIDENCE));
+      evidence.put("selection_crop_text", value);
+      putNormalizedBbox(evidence, "value_bbox", bbox, firstPage.imageWidth(), firstPage.imageHeight());
+      updated += 1;
+    }
+    return updated;
+  }
+
+  private RenderedOcrPage firstPage(List<RenderedOcrPage> pages) {
+    if (pages == null) {
+      return null;
+    }
+    return pages.stream()
+        .filter(page -> page != null && page.page() == 1)
+        .findFirst()
+        .orElse(null);
+  }
+
+  private List<ApplicationTypeCheckbox> selectedApplicationTypeCheckboxes(RenderedOcrPage page) {
+    if (page.pngBytes() == null || page.pngBytes().length == 0) {
+      return List.of();
+    }
+    try {
+      BufferedImage image = ImageIO.read(new ByteArrayInputStream(page.pngBytes()));
+      if (image == null || image.getWidth() <= 0 || image.getHeight() <= 0) {
+        return List.of();
+      }
+      List<ApplicationTypeCheckbox> selected = new ArrayList<>();
+      for (ApplicationTypeCheckbox checkbox : APPLICATION_TYPE_CHECKBOXES) {
+        if (hasBlueApplicantInk(image, absoluteBbox(checkbox, image.getWidth(), image.getHeight()))) {
+          selected.add(checkbox);
+        }
+      }
+      return List.copyOf(selected);
+    } catch (IOException | RuntimeException exception) {
+      return List.of();
+    }
+  }
+
+  private boolean hasBlueApplicantInk(BufferedImage image, List<Integer> bbox) {
+    if (bbox.size() < 4) {
+      return false;
+    }
+    int count = 0;
+    int left = Math.max(0, Math.min(image.getWidth(), bbox.get(0)));
+    int top = Math.max(0, Math.min(image.getHeight(), bbox.get(1)));
+    int right = Math.max(left, Math.min(image.getWidth(), bbox.get(2)));
+    int bottom = Math.max(top, Math.min(image.getHeight(), bbox.get(3)));
+    for (int y = top; y < bottom; y += 1) {
+      for (int x = left; x < right; x += 1) {
+        if (isBlueInk(image.getRGB(x, y))) {
+          count += 1;
+        }
+      }
+    }
+    return count >= 12;
+  }
+
+  private boolean isBlueInk(int rgb) {
+    int red = (rgb >> 16) & 0xff;
+    int green = (rgb >> 8) & 0xff;
+    int blue = rgb & 0xff;
+    return blue >= 90
+        && blue > red + 20
+        && blue > green + 8
+        && (blue - red) + (blue - green) >= 55;
+  }
+
+  private String joinedSelectedValues(List<ApplicationTypeCheckbox> checkboxes) {
+    List<String> values = new ArrayList<>();
+    for (ApplicationTypeCheckbox checkbox : checkboxes) {
+      if (!values.contains(checkbox.value())) {
+        values.add(checkbox.value());
+      }
+    }
+    return String.join("; ", values);
+  }
+
+  private List<Integer> absoluteBbox(ApplicationTypeCheckbox checkbox, int imageWidth, int imageHeight) {
+    return List.of(
+        (int) Math.round(checkbox.left() * imageWidth),
+        (int) Math.round(checkbox.top() * imageHeight),
+        (int) Math.round(checkbox.right() * imageWidth),
+        (int) Math.round(checkbox.bottom() * imageHeight)
+    );
+  }
+
+  private List<Integer> unionBbox(List<List<Integer>> boxes) {
+    List<List<Integer>> usable = boxes.stream()
+        .filter(box -> box.size() >= 4)
+        .toList();
+    if (usable.isEmpty()) {
+      return List.of();
+    }
+    int left = usable.stream().mapToInt(box -> box.get(0)).min().orElse(0);
+    int top = usable.stream().mapToInt(box -> box.get(1)).min().orElse(0);
+    int right = usable.stream().mapToInt(box -> box.get(2)).max().orElse(left);
+    int bottom = usable.stream().mapToInt(box -> box.get(3)).max().orElse(top);
+    return List.of(left, top, right, bottom);
   }
 
   private boolean shouldClear(FieldCropTranscriptionResult result, String filteredCropText) {
@@ -727,6 +880,16 @@ public class SelectionFieldCropRefinementService {
       String label,
       String currentValue,
       JsonNode evidence
+  ) {}
+
+  private record ApplicationTypeCheckbox(
+      String fieldKey,
+      String label,
+      String value,
+      double left,
+      double top,
+      double right,
+      double bottom
   ) {}
 
   private record CropResult(byte[] bytes, String dataUrl) {}

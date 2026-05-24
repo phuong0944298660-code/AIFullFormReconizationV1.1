@@ -8,10 +8,13 @@ import com.aiform.id995a.llm.FieldCropTranscriptionResult;
 import com.aiform.id995a.llm.LlmModelProfile;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import javax.imageio.ImageIO;
@@ -298,6 +301,97 @@ class SelectionFieldCropRefinementServiceTest {
     assertThat(gateway.requests.get(0).path()).isEqualTo("hk_identity_card_no");
   }
 
+  @Test
+  void restoresApplicationTypeRowsFromFirstPageCheckboxes() throws Exception {
+    FakeFieldCropTranscriptionGateway gateway = new FakeFieldCropTranscriptionGateway(List.of());
+    SelectionFieldCropRefinementService service = new SelectionFieldCropRefinementService(gateway, objectMapper);
+    JsonNode structuredData = objectMapper.readTree("""
+        {
+          "page_1": {
+            "application_type": "Entry visa"
+          },
+          "_field_evidence": {
+            "page_1": {
+              "application_type": {
+                "label": "Application Type",
+                "value_bbox": {"x": 0.72, "y": 0.35, "width": 0.16, "height": 0.07}
+              }
+            }
+          }
+        }
+        """);
+
+    SelectionFieldCropRefinementResult result = service.refine(
+        "sample.pdf",
+        structuredData,
+        List.of(renderedApplicationTypePage(true, true, false, false)),
+        modelProfile()
+    );
+
+    assertThat(result.updated()).isEqualTo(2);
+    assertThat(result.data().at("/page_1/application_type/entry_to_hong_kong_to_take_up_employment_as_a_domestic_helper_from_abroad").asText())
+        .isEqualTo("entry visa");
+    assertThat(result.data().at("/page_1/application_type/contract_renewal_with_the_same_employer_or_change_of_employer").asText())
+        .isEqualTo("entry visa");
+    assertThat(result.data().at("/page_1/application_type/complete_the_remaining_extended_period_of_the_current_contract").isMissingNode())
+        .isTrue();
+    assertThat(result.data().at("/_field_evidence/page_1/application_type/contract_renewal_with_the_same_employer_or_change_of_employer/label").asText())
+        .isEqualTo("Contract renewal with the same employer or change of employer");
+  }
+
+  @Test
+  void restoresContractRenewalExtensionChoiceFromLowerApplicationTypeCheckbox() throws Exception {
+    FakeFieldCropTranscriptionGateway gateway = new FakeFieldCropTranscriptionGateway(List.of());
+    SelectionFieldCropRefinementService service = new SelectionFieldCropRefinementService(gateway, objectMapper);
+    JsonNode structuredData = objectMapper.readTree("""
+        {
+          "page_1": {
+            "application_type": "Entry visa"
+          }
+        }
+        """);
+
+    SelectionFieldCropRefinementResult result = service.refine(
+        "sample.pdf",
+        structuredData,
+        List.of(renderedApplicationTypePage(false, false, true, false)),
+        modelProfile()
+    );
+
+    assertThat(result.updated()).isEqualTo(1);
+    assertThat(result.data().at("/page_1/application_type/contract_renewal_with_the_same_employer_or_change_of_employer").asText())
+        .isEqualTo("entry visa AND Extension of Stay");
+    assertThat(result.data().at("/page_1/application_type/entry_to_hong_kong_to_take_up_employment_as_a_domestic_helper_from_abroad").isMissingNode())
+        .isTrue();
+  }
+
+  @Test
+  void restoresApplicationTypeRowsFromActualHuangXiaolanFirstPage() throws Exception {
+    FakeFieldCropTranscriptionGateway gateway = new FakeFieldCropTranscriptionGateway(List.of());
+    SelectionFieldCropRefinementService service = new SelectionFieldCropRefinementService(gateway, objectMapper);
+    JsonNode structuredData = objectMapper.readTree("""
+        {
+          "page_1": {
+            "application_type": "Entry visa"
+          }
+        }
+        """);
+
+    SelectionFieldCropRefinementResult result = service.refine(
+        "黄晓兰A.pdf",
+        structuredData,
+        List.of(renderActualHuangXiaolanFirstPage()),
+        modelProfile()
+    );
+
+    assertThat(result.data().at("/page_1/application_type/entry_to_hong_kong_to_take_up_employment_as_a_domestic_helper_from_abroad").asText())
+        .isEqualTo("entry visa");
+    assertThat(result.data().at("/page_1/application_type/contract_renewal_with_the_same_employer_or_change_of_employer").asText())
+        .isEqualTo("entry visa");
+    assertThat(result.data().at("/page_1/application_type/complete_the_remaining_extended_period_of_the_current_contract").isMissingNode())
+        .isTrue();
+  }
+
   private RenderedOcrPage renderedPage(int page) throws Exception {
     BufferedImage image = new BufferedImage(220, 140, BufferedImage.TYPE_INT_RGB);
     Graphics2D graphics = image.createGraphics();
@@ -317,6 +411,78 @@ class SelectionFieldCropRefinementServiceTest {
         220,
         140
     );
+  }
+
+  private RenderedOcrPage renderedApplicationTypePage(
+      boolean entryVisa,
+      boolean contractRenewalEntryVisa,
+      boolean contractRenewalEntryVisaAndExtension,
+      boolean remainingContractExtension
+  ) throws Exception {
+    BufferedImage image = new BufferedImage(1131, 1600, BufferedImage.TYPE_INT_RGB);
+    Graphics2D graphics = image.createGraphics();
+    graphics.setColor(Color.WHITE);
+    graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
+    graphics.setColor(Color.BLACK);
+    graphics.drawString("Application Type", 110, 540);
+    graphics.drawString("Entry to Hong Kong to take up employment as a domestic helper from abroad", 120, 650);
+    graphics.drawString("Contract renewal with the same employer or change of employer", 120, 735);
+    graphics.drawString("Complete the remaining/extended period of the current contract", 120, 940);
+    drawCheckbox(graphics, image, 0.755, 0.305);
+    drawCheckbox(graphics, image, 0.755, 0.378);
+    drawCheckbox(graphics, image, 0.755, 0.440);
+    drawCheckbox(graphics, image, 0.755, 0.505);
+    if (entryVisa) {
+      drawBlueTick(graphics, image, 0.755, 0.305);
+    }
+    if (contractRenewalEntryVisa) {
+      drawBlueTick(graphics, image, 0.755, 0.378);
+    }
+    if (contractRenewalEntryVisaAndExtension) {
+      drawBlueTick(graphics, image, 0.755, 0.440);
+    }
+    if (remainingContractExtension) {
+      drawBlueTick(graphics, image, 0.755, 0.505);
+    }
+    graphics.dispose();
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+    ImageIO.write(image, "png", output);
+    byte[] bytes = output.toByteArray();
+    return new RenderedOcrPage(
+        1,
+        bytes,
+        "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(bytes),
+        image.getWidth(),
+        image.getHeight()
+    );
+  }
+
+  private void drawCheckbox(Graphics2D graphics, BufferedImage image, double centerX, double centerY) {
+    int size = 24;
+    int x = (int) Math.round(image.getWidth() * centerX) - size / 2;
+    int y = (int) Math.round(image.getHeight() * centerY) - size / 2;
+    graphics.setColor(Color.BLACK);
+    graphics.setStroke(new BasicStroke(2f));
+    graphics.drawRect(x, y, size, size);
+  }
+
+  private void drawBlueTick(Graphics2D graphics, BufferedImage image, double centerX, double centerY) {
+    int x = (int) Math.round(image.getWidth() * centerX);
+    int y = (int) Math.round(image.getHeight() * centerY);
+    graphics.setColor(new Color(75, 105, 245));
+    graphics.setStroke(new BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+    graphics.drawLine(x - 13, y + 3, x - 4, y + 13);
+    graphics.drawLine(x - 4, y + 13, x + 21, y - 32);
+  }
+
+  private RenderedOcrPage renderActualHuangXiaolanFirstPage() throws Exception {
+    Path path = Path.of("..", "docs", "5.12_full_tests", "黄晓兰A.pdf");
+    if (!Files.exists(path)) {
+      path = Path.of("docs", "5.12_full_tests", "黄晓兰A.pdf");
+    }
+    return new BaiduOcrPageRenderer(BaiduOcrPageRenderer.DEFAULT_RENDER_DPI, 0)
+        .render(path.getFileName().toString(), "application/pdf", Files.readAllBytes(path))
+        .get(0);
   }
 
   private LlmModelProfile modelProfile() {
