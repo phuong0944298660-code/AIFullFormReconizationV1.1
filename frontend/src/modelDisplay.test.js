@@ -21,6 +21,17 @@ test('normalizeModelOptions replaces legacy backend labels before rendering', ()
   )
 })
 
+test('normalizeModelOptions hides qwen3.6-plus from frontend selectors', () => {
+  assert.deepEqual(
+    normalizeModelOptions([
+      { id: 'local-qwen3.6-35b-a3b', label: 'Local model' },
+      { id: 'qwen3.6-plus', label: 'qwen3.6-plus' },
+      { id: 'dashscope-qwen3.6-35b-a3b', label: 'Cloud native model' }
+    ]).map((model) => model.id),
+    ['local-qwen3.6-35b-a3b', 'dashscope-qwen3.6-35b-a3b']
+  )
+})
+
 test('extractionModeDisplayLabel maps legacy result status text', () => {
   assert.equal(
     extractionModeDisplayLabel({ engineStatus: { extractionMode: 'Qwen3.6-35B-A3B multimodal structured extraction' } }),

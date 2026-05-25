@@ -33,8 +33,12 @@ const progressStage = ref(runtimeState.progressStage || '')
 const progressDetail = ref(runtimeState.progressDetail || '')
 const jobStatus = ref(runtimeState.jobStatus || null)
 const activeJobId = ref(runtimeState.activeJobId || '')
-const modelOptions = ref(runtimeState.modelOptions || [])
-const selectedModelId = ref(runtimeState.selectedModelId || '')
+const modelOptions = ref(normalizeModelOptions(runtimeState.modelOptions || []))
+const selectedModelId = ref(
+  modelOptions.value.some((model) => model.id === runtimeState.selectedModelId)
+    ? runtimeState.selectedModelId
+    : ''
+)
 let activeRunId = 0
 
 const pages = computed(() => response.value?.pages || [])

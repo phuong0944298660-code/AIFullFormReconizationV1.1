@@ -15,6 +15,19 @@ const LEGACY_LABELS = new Map([
   ['qwen3.6-35b-a3b', CLOUD_NATIVE_MODEL_LABEL]
 ])
 
+const HIDDEN_MODEL_KEYS = new Set(['qwen3.6-plus'])
+
+function normalizedModelKey(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+export function isHiddenModelOption(model) {
+  const values = typeof model === 'string'
+    ? [model]
+    : [model?.id, model?.model, model?.label, model?.name]
+  return values.some((value) => HIDDEN_MODEL_KEYS.has(normalizedModelKey(value)))
+}
+
 export function modelDisplayLabel(model, fallback = LOCAL_MODEL_LABEL) {
   if (!model) return fallback
   if (typeof model === 'string') {
@@ -28,10 +41,12 @@ export function modelDisplayLabel(model, fallback = LOCAL_MODEL_LABEL) {
 }
 
 export function normalizeModelOptions(models = []) {
-  return models.map((model) => ({
-    ...model,
-    label: modelDisplayLabel(model, model?.label || '')
-  }))
+  return models
+    .filter((model) => !isHiddenModelOption(model))
+    .map((model) => ({
+      ...model,
+      label: modelDisplayLabel(model, model?.label || '')
+    }))
 }
 
 export function extractionModeDisplayLabel(response) {
