@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Stream;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 
@@ -325,7 +326,8 @@ class SelectionFieldCropRefinementServiceTest {
         "sample.pdf",
         structuredData,
         List.of(renderedApplicationTypePage(true, true, false, false)),
-        modelProfile()
+        modelProfile(),
+        template("id988a_2024_06")
     );
 
     assertThat(result.updated()).isEqualTo(2);
@@ -355,7 +357,8 @@ class SelectionFieldCropRefinementServiceTest {
         "sample.pdf",
         structuredData,
         List.of(renderedApplicationTypePage(false, false, true, false)),
-        modelProfile()
+        modelProfile(),
+        template("id988a_2024_06")
     );
 
     assertThat(result.updated()).isEqualTo(1);
@@ -363,6 +366,111 @@ class SelectionFieldCropRefinementServiceTest {
         .isEqualTo("entry visa AND Extension of Stay");
     assertThat(result.data().at("/page_1/application_type/entry_to_hong_kong_to_take_up_employment_as_a_domestic_helper_from_abroad").isMissingNode())
         .isTrue();
+  }
+
+  @Test
+  void doesNotApplyApplicationTypeRowsToOtherTemplates() throws Exception {
+    FakeFieldCropTranscriptionGateway gateway = new FakeFieldCropTranscriptionGateway(List.of());
+    SelectionFieldCropRefinementService service = new SelectionFieldCropRefinementService(gateway, objectMapper);
+    JsonNode structuredData = objectMapper.readTree("""
+        {
+          "page_1": {
+            "application_type": "Entry visa"
+          }
+        }
+        """);
+
+    SelectionFieldCropRefinementResult result = service.refine(
+        "sample.pdf",
+        structuredData,
+        List.of(renderedApplicationTypePage(true, true, false, false)),
+        modelProfile(),
+        template("id988b_2024_06")
+    );
+
+    assertThat(result.data().at("/page_1/application_type").asText()).isEqualTo("Entry visa");
+    assertThat(result.data().at("/page_1/application_type/entry_to_hong_kong_to_take_up_employment_as_a_domestic_helper_from_abroad").isMissingNode())
+        .isTrue();
+  }
+
+  @Test
+  void clearsUnselectedApplicationTypeFor988aTemplate() throws Exception {
+    FakeFieldCropTranscriptionGateway gateway = new FakeFieldCropTranscriptionGateway(List.of());
+    SelectionFieldCropRefinementService service = new SelectionFieldCropRefinementService(gateway, objectMapper);
+    JsonNode structuredData = objectMapper.readTree("""
+        {
+          "page_1": {
+            "application_type": "Entry visa"
+          }
+        }
+        """);
+
+    SelectionFieldCropRefinementResult result = service.refine(
+        "sample.pdf",
+        structuredData,
+        List.of(renderedApplicationTypePage(false, false, false, false)),
+        modelProfile(),
+        template("id988a_2024_06")
+    );
+
+    assertThat(result.data().at("/page_1/application_type").isMissingNode()).isTrue();
+  }
+
+  @Test
+  void restoresApplicationTypeRowsFromBlackCheckboxTickFor988aTemplate() throws Exception {
+    FakeFieldCropTranscriptionGateway gateway = new FakeFieldCropTranscriptionGateway(List.of());
+    SelectionFieldCropRefinementService service = new SelectionFieldCropRefinementService(gateway, objectMapper);
+    JsonNode structuredData = objectMapper.readTree("""
+        {
+          "page_1": {
+            "application_type": "Entry visa"
+          }
+        }
+        """);
+
+    SelectionFieldCropRefinementResult result = service.refine(
+        "sample.pdf",
+        structuredData,
+        List.of(renderedApplicationTypePageWithMarks(
+            CheckboxMark.BLACK_TICK,
+            CheckboxMark.NONE,
+            CheckboxMark.NONE,
+            CheckboxMark.NONE
+        )),
+        modelProfile(),
+        template("id988a_2024_06")
+    );
+
+    assertThat(result.data().at("/page_1/application_type/entry_to_hong_kong_to_take_up_employment_as_a_domestic_helper_from_abroad").asText())
+        .isEqualTo("entry visa");
+  }
+
+  @Test
+  void ignoresSmudgedApplicationTypeCheckboxFor988aTemplate() throws Exception {
+    FakeFieldCropTranscriptionGateway gateway = new FakeFieldCropTranscriptionGateway(List.of());
+    SelectionFieldCropRefinementService service = new SelectionFieldCropRefinementService(gateway, objectMapper);
+    JsonNode structuredData = objectMapper.readTree("""
+        {
+          "page_1": {
+            "application_type": "Entry visa"
+          }
+        }
+        """);
+
+    SelectionFieldCropRefinementResult result = service.refine(
+        "sample.pdf",
+        structuredData,
+        List.of(renderedApplicationTypePageWithMarks(
+            CheckboxMark.BLUE_SMUDGE,
+            CheckboxMark.NONE,
+            CheckboxMark.NONE,
+            CheckboxMark.NONE
+        )),
+        modelProfile(),
+        template("id988a_2024_06")
+    );
+
+    assertThat(result.data().at("/page_1/application_type").isMissingNode()).isTrue();
   }
 
   @Test
@@ -380,8 +488,9 @@ class SelectionFieldCropRefinementServiceTest {
     SelectionFieldCropRefinementResult result = service.refine(
         "黄晓兰A.pdf",
         structuredData,
-        List.of(renderActualHuangXiaolanFirstPage()),
-        modelProfile()
+        List.of(renderActualHuangXiaolanFirstPageByPrefix()),
+        modelProfile(),
+        template("id988a_2024_06")
     );
 
     assertThat(result.data().at("/page_1/application_type/entry_to_hong_kong_to_take_up_employment_as_a_domestic_helper_from_abroad").asText())
@@ -390,6 +499,36 @@ class SelectionFieldCropRefinementServiceTest {
         .isEqualTo("entry visa");
     assertThat(result.data().at("/page_1/application_type/complete_the_remaining_extended_period_of_the_current_contract").isMissingNode())
         .isTrue();
+  }
+
+  @Test
+  void restoresContractRenewalEntryVisaFromActualLiJunxianFirstPageAndClearsGenericVisaType() throws Exception {
+    FakeFieldCropTranscriptionGateway gateway = new FakeFieldCropTranscriptionGateway(List.of());
+    SelectionFieldCropRefinementService service = new SelectionFieldCropRefinementService(gateway, objectMapper);
+    JsonNode structuredData = objectMapper.readTree("""
+        {
+          "page_1": {
+            "application_type": {
+              "entry_to_hong_kong_to_take_up_employment_as_a_domestic_helper_from_abroad": "entry visa"
+            },
+            "visa_type": "Entry visa"
+          }
+        }
+        """);
+
+    SelectionFieldCropRefinementResult result = service.refine(
+        "\u674e\u4fca\u8d24-A.pdf",
+        structuredData,
+        List.of(renderActualFirstPageByPrefix("\u674e\u4fca\u8d24-A")),
+        modelProfile(),
+        template("id988a_2024_06")
+    );
+
+    assertThat(result.data().at("/page_1/application_type/contract_renewal_with_the_same_employer_or_change_of_employer").asText())
+        .isEqualTo("entry visa");
+    assertThat(result.data().at("/page_1/application_type/entry_to_hong_kong_to_take_up_employment_as_a_domestic_helper_from_abroad").isMissingNode())
+        .isTrue();
+    assertThat(result.data().at("/page_1/visa_type").isMissingNode()).isTrue();
   }
 
   private RenderedOcrPage renderedPage(int page) throws Exception {
@@ -419,11 +558,42 @@ class SelectionFieldCropRefinementServiceTest {
       boolean contractRenewalEntryVisaAndExtension,
       boolean remainingContractExtension
   ) throws Exception {
+    return renderedApplicationTypePageWithMarks(
+        entryVisa ? CheckboxMark.BLUE_TICK : CheckboxMark.NONE,
+        contractRenewalEntryVisa ? CheckboxMark.BLUE_TICK : CheckboxMark.NONE,
+        contractRenewalEntryVisaAndExtension ? CheckboxMark.BLUE_TICK : CheckboxMark.NONE,
+        remainingContractExtension ? CheckboxMark.BLUE_TICK : CheckboxMark.NONE
+    );
+  }
+
+  private RenderedOcrPage renderedApplicationTypePageWithMarks(
+      CheckboxMark entryVisa,
+      CheckboxMark contractRenewalEntryVisa,
+      CheckboxMark contractRenewalEntryVisaAndExtension,
+      CheckboxMark remainingContractExtension
+  ) throws Exception {
     BufferedImage image = new BufferedImage(1131, 1600, BufferedImage.TYPE_INT_RGB);
     Graphics2D graphics = image.createGraphics();
     graphics.setColor(Color.WHITE);
     graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
     graphics.setColor(Color.BLACK);
+    graphics.setStroke(new BasicStroke(2f));
+    int tableLeft = (int) Math.round(image.getWidth() * 0.07);
+    int tableRight = (int) Math.round(image.getWidth() * 0.92);
+    int separator = (int) Math.round(image.getWidth() * 0.70);
+    int[] rows = {
+        (int) Math.round(image.getHeight() * 0.270),
+        (int) Math.round(image.getHeight() * 0.294),
+        (int) Math.round(image.getHeight() * 0.340),
+        (int) Math.round(image.getHeight() * 0.475),
+        (int) Math.round(image.getHeight() * 0.550)
+    };
+    for (int row : rows) {
+      graphics.drawLine(tableLeft, row, tableRight, row);
+    }
+    graphics.drawLine(tableLeft, rows[0], tableLeft, rows[4]);
+    graphics.drawLine(tableRight, rows[0], tableRight, rows[4]);
+    graphics.drawLine(separator, rows[1], separator, rows[4]);
     graphics.drawString("Application Type", 110, 540);
     graphics.drawString("Entry to Hong Kong to take up employment as a domestic helper from abroad", 120, 650);
     graphics.drawString("Contract renewal with the same employer or change of employer", 120, 735);
@@ -432,18 +602,10 @@ class SelectionFieldCropRefinementServiceTest {
     drawCheckbox(graphics, image, 0.755, 0.378);
     drawCheckbox(graphics, image, 0.755, 0.440);
     drawCheckbox(graphics, image, 0.755, 0.505);
-    if (entryVisa) {
-      drawBlueTick(graphics, image, 0.755, 0.305);
-    }
-    if (contractRenewalEntryVisa) {
-      drawBlueTick(graphics, image, 0.755, 0.378);
-    }
-    if (contractRenewalEntryVisaAndExtension) {
-      drawBlueTick(graphics, image, 0.755, 0.440);
-    }
-    if (remainingContractExtension) {
-      drawBlueTick(graphics, image, 0.755, 0.505);
-    }
+    drawMark(graphics, image, 0.755, 0.305, entryVisa);
+    drawMark(graphics, image, 0.755, 0.378, contractRenewalEntryVisa);
+    drawMark(graphics, image, 0.755, 0.440, contractRenewalEntryVisaAndExtension);
+    drawMark(graphics, image, 0.755, 0.505, remainingContractExtension);
     graphics.dispose();
     ByteArrayOutputStream output = new ByteArrayOutputStream();
     ImageIO.write(image, "png", output);
@@ -467,18 +629,73 @@ class SelectionFieldCropRefinementServiceTest {
   }
 
   private void drawBlueTick(Graphics2D graphics, BufferedImage image, double centerX, double centerY) {
+    drawTick(graphics, image, centerX, centerY, new Color(75, 105, 245));
+  }
+
+  private void drawMark(Graphics2D graphics, BufferedImage image, double centerX, double centerY, CheckboxMark mark) {
+    switch (mark) {
+      case NONE -> {
+      }
+      case BLUE_TICK -> drawTick(graphics, image, centerX, centerY, new Color(75, 105, 245));
+      case BLACK_TICK -> drawTick(graphics, image, centerX, centerY, Color.BLACK);
+      case BLUE_SMUDGE -> drawBlueSmudge(graphics, image, centerX, centerY);
+    }
+  }
+
+  private void drawTick(Graphics2D graphics, BufferedImage image, double centerX, double centerY, Color color) {
     int x = (int) Math.round(image.getWidth() * centerX);
     int y = (int) Math.round(image.getHeight() * centerY);
-    graphics.setColor(new Color(75, 105, 245));
+    graphics.setColor(color);
     graphics.setStroke(new BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
     graphics.drawLine(x - 13, y + 3, x - 4, y + 13);
     graphics.drawLine(x - 4, y + 13, x + 21, y - 32);
+  }
+
+  private void drawBlueSmudge(Graphics2D graphics, BufferedImage image, double centerX, double centerY) {
+    int x = (int) Math.round(image.getWidth() * centerX);
+    int y = (int) Math.round(image.getHeight() * centerY);
+    graphics.setColor(new Color(75, 105, 245));
+    graphics.fillOval(x - 10, y - 12, 20, 24);
+    graphics.setStroke(new BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+    graphics.drawLine(x - 8, y + 1, x + 8, y - 2);
+  }
+
+  private RenderedOcrPage renderActualHuangXiaolanFirstPageByPrefix() throws Exception {
+    Path samplesDir = Files.exists(Path.of("..", "docs", "5.12_full_tests"))
+        ? Path.of("..", "docs", "5.12_full_tests")
+        : Path.of("docs", "5.12_full_tests");
+    Path path;
+    try (Stream<Path> files = Files.list(samplesDir)) {
+      path = files
+          .filter(file -> file.getFileName().toString().startsWith("黄晓兰A"))
+          .findFirst()
+          .orElseThrow();
+    }
+    return new BaiduOcrPageRenderer(BaiduOcrPageRenderer.DEFAULT_RENDER_DPI, 0)
+        .render(path.getFileName().toString(), "application/pdf", Files.readAllBytes(path))
+        .get(0);
   }
 
   private RenderedOcrPage renderActualHuangXiaolanFirstPage() throws Exception {
     Path path = Path.of("..", "docs", "5.12_full_tests", "黄晓兰A.pdf");
     if (!Files.exists(path)) {
       path = Path.of("docs", "5.12_full_tests", "黄晓兰A.pdf");
+    }
+    return new BaiduOcrPageRenderer(BaiduOcrPageRenderer.DEFAULT_RENDER_DPI, 0)
+        .render(path.getFileName().toString(), "application/pdf", Files.readAllBytes(path))
+        .get(0);
+  }
+
+  private RenderedOcrPage renderActualFirstPageByPrefix(String filenamePrefix) throws Exception {
+    Path samplesDir = Files.exists(Path.of("..", "docs", "5.12_full_tests"))
+        ? Path.of("..", "docs", "5.12_full_tests")
+        : Path.of("docs", "5.12_full_tests");
+    Path path;
+    try (Stream<Path> files = Files.list(samplesDir)) {
+      path = files
+          .filter(file -> file.getFileName().toString().startsWith(filenamePrefix))
+          .findFirst()
+          .orElseThrow();
     }
     return new BaiduOcrPageRenderer(BaiduOcrPageRenderer.DEFAULT_RENDER_DPI, 0)
         .render(path.getFileName().toString(), "application/pdf", Files.readAllBytes(path))
@@ -497,6 +714,17 @@ class SelectionFieldCropRefinementServiceTest {
         true,
         ""
     );
+  }
+
+  private DocumentTemplate template(String templateId) {
+    return new DocumentTemplate(templateId, "", 5, 98, "test", "hash");
+  }
+
+  private enum CheckboxMark {
+    NONE,
+    BLUE_TICK,
+    BLACK_TICK,
+    BLUE_SMUDGE
   }
 
   private static final class FakeFieldCropTranscriptionGateway implements FieldCropTranscriptionGateway {

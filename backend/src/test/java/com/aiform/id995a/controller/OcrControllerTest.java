@@ -10,6 +10,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.aiform.id995a.llm.StructuredExtractionGateway;
 import com.aiform.id995a.llm.StructuredExtractionResult;
+import com.aiform.id995a.ocr.DocumentTemplate;
+import com.aiform.id995a.ocr.TemplateClassificationLogService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Base64;
 import org.junit.jupiter.api.Test;
@@ -185,6 +187,18 @@ class OcrControllerTest {
             "{\"page_1\":{\"part_2_personal_particulars\":{\"surname_en\":\"CHAN\",\"alias\":null}}}",
             "Qwen3.6-35B-A3B"
         );
+      };
+    }
+
+    @Bean
+    @Primary
+    TemplateClassificationLogService noOpTemplateClassificationLogService(
+        com.fasterxml.jackson.databind.ObjectMapper objectMapper
+    ) {
+      return new TemplateClassificationLogService(objectMapper) {
+        @Override
+        public synchronized void record(String filename, DocumentTemplate template) {
+        }
       };
     }
   }

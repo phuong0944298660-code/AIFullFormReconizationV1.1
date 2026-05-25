@@ -21,12 +21,18 @@ public class OcrJobService {
 
   private final BaiduOcrPageRenderer pageRenderer;
   private final OcrDemoService ocrDemoService;
+  private final TemplateDetectionService templateDetectionService;
   private final ConcurrentMap<String, OcrJobState> jobs = new ConcurrentHashMap<>();
   private final ExecutorService executor = Executors.newCachedThreadPool();
 
-  public OcrJobService(BaiduOcrPageRenderer pageRenderer, OcrDemoService ocrDemoService) {
+  public OcrJobService(
+      BaiduOcrPageRenderer pageRenderer,
+      OcrDemoService ocrDemoService,
+      TemplateDetectionService templateDetectionService
+  ) {
     this.pageRenderer = pageRenderer;
     this.ocrDemoService = ocrDemoService;
+    this.templateDetectionService = templateDetectionService;
   }
 
   public OcrJobStatusResponse start(String filename, String contentType, byte[] fileBytes) {
@@ -70,11 +76,13 @@ public class OcrJobService {
         return;
       }
       state.initializePages(pages);
+      DocumentTemplate template = templateDetectionService.detect(filename, contentType, fileBytes, pages);
       OcrDemoResponse result = ocrDemoService.recognizeRendered(
           state.filename(),
           pages,
           state.progressListener(),
-          modelId
+          modelId,
+          template
       );
       if (state.isCanceled()) {
         return;

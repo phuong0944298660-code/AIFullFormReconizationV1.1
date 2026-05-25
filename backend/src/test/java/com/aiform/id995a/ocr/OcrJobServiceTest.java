@@ -25,6 +25,7 @@ class OcrJobServiceTest {
   void cancelInterruptsRunningJobAndReportsCanceledStatus() throws Exception {
     BaiduOcrPageRenderer renderer = mock(BaiduOcrPageRenderer.class);
     OcrDemoService demoService = mock(OcrDemoService.class);
+    TemplateDetectionService templateDetectionService = mock(TemplateDetectionService.class);
     CountDownLatch recognitionStarted = new CountDownLatch(1);
     CountDownLatch recognitionInterrupted = new CountDownLatch(1);
     RenderedOcrPage page = new RenderedOcrPage(
@@ -35,8 +36,10 @@ class OcrJobServiceTest {
         10
     );
     when(renderer.render(anyString(), anyString(), any())).thenReturn(List.of(page));
+    when(templateDetectionService.detect(anyString(), anyString(), any(), anyList()))
+        .thenReturn(new DocumentTemplate("id988a_2024_06", "ID 988A (06/2024)", 1, 98, "test", "hash"));
     when(demoService.normalizeFilename(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
-    when(demoService.recognizeRendered(anyString(), anyList(), any(ExtractionProgressListener.class), any()))
+    when(demoService.recognizeRendered(anyString(), anyList(), any(ExtractionProgressListener.class), any(), any(DocumentTemplate.class)))
         .thenAnswer(invocation -> {
           recognitionStarted.countDown();
           try {
@@ -49,7 +52,7 @@ class OcrJobServiceTest {
           throw new IOException("test did not cancel the job");
         });
 
-    OcrJobService service = new OcrJobService(renderer, demoService);
+    OcrJobService service = new OcrJobService(renderer, demoService, templateDetectionService);
     OcrJobStatusResponse started = service.start("sample.pdf", "application/pdf", "pdf".getBytes(StandardCharsets.UTF_8));
     assertThat(recognitionStarted.await(2, TimeUnit.SECONDS)).isTrue();
 
@@ -66,6 +69,7 @@ class OcrJobServiceTest {
   void reportsPostProcessingProgressBeforeFinalResult() throws Exception {
     BaiduOcrPageRenderer renderer = mock(BaiduOcrPageRenderer.class);
     OcrDemoService demoService = mock(OcrDemoService.class);
+    TemplateDetectionService templateDetectionService = mock(TemplateDetectionService.class);
     CountDownLatch postProcessingStarted = new CountDownLatch(1);
     CountDownLatch releasePostProcessing = new CountDownLatch(1);
     RenderedOcrPage page1 = new RenderedOcrPage(
@@ -83,8 +87,10 @@ class OcrJobServiceTest {
         10
     );
     when(renderer.render(anyString(), anyString(), any())).thenReturn(List.of(page1, page2));
+    when(templateDetectionService.detect(anyString(), anyString(), any(), anyList()))
+        .thenReturn(new DocumentTemplate("id988a_2024_06", "ID 988A (06/2024)", 2, 98, "test", "hash"));
     when(demoService.normalizeFilename(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
-    when(demoService.recognizeRendered(anyString(), anyList(), any(ExtractionProgressListener.class), any()))
+    when(demoService.recognizeRendered(anyString(), anyList(), any(ExtractionProgressListener.class), any(), any(DocumentTemplate.class)))
         .thenAnswer(invocation -> {
           ExtractionProgressListener listener = invocation.getArgument(2);
           listener.pageStarted(1);
@@ -106,7 +112,7 @@ class OcrJobServiceTest {
           );
         });
 
-    OcrJobService service = new OcrJobService(renderer, demoService);
+    OcrJobService service = new OcrJobService(renderer, demoService, templateDetectionService);
     OcrJobStatusResponse started = service.start("sample.pdf", "application/pdf", "pdf".getBytes(StandardCharsets.UTF_8));
     assertThat(postProcessingStarted.await(2, TimeUnit.SECONDS)).isTrue();
 

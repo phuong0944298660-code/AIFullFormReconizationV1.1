@@ -1,11 +1,14 @@
 package com.aiform.id995a.ocr;
 
-import com.aiform.id995a.llm.StructuredExtractionGateway;
-import com.aiform.id995a.llm.StructuredExtractionResult;
 import com.aiform.id995a.llm.ExtractionProgressListener;
 import com.aiform.id995a.llm.LlmModelProfile;
 import com.aiform.id995a.llm.LlmModelRegistry;
+import com.aiform.id995a.llm.StructuredExtractionGateway;
+import com.aiform.id995a.llm.StructuredExtractionResult;
 import com.aiform.id995a.review.EngineStatus;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +25,8 @@ public class OcrDemoService {
   private final SelectionFieldCropRefinementService selectionFieldCropRefinementService;
   private final DeclarationFooterFieldRefinementService declarationFooterFieldRefinementService;
   private final SmudgedFieldValueFilterService smudgedFieldValueFilterService;
+  private final TemplateDetectionService templateDetectionService;
+  private final TemplateClassificationLogService templateClassificationLogService;
   private final LlmModelRegistry llmModelRegistry;
 
   public OcrDemoService(
@@ -33,6 +38,8 @@ public class OcrDemoService {
       SelectionFieldCropRefinementService selectionFieldCropRefinementService,
       DeclarationFooterFieldRefinementService declarationFooterFieldRefinementService,
       SmudgedFieldValueFilterService smudgedFieldValueFilterService,
+      TemplateDetectionService templateDetectionService,
+      TemplateClassificationLogService templateClassificationLogService,
       LlmModelRegistry llmModelRegistry
   ) {
     this.pageRenderer = pageRenderer;
@@ -43,6 +50,8 @@ public class OcrDemoService {
     this.selectionFieldCropRefinementService = selectionFieldCropRefinementService;
     this.declarationFooterFieldRefinementService = declarationFooterFieldRefinementService;
     this.smudgedFieldValueFilterService = smudgedFieldValueFilterService;
+    this.templateDetectionService = templateDetectionService;
+    this.templateClassificationLogService = templateClassificationLogService;
     this.llmModelRegistry = llmModelRegistry;
   }
 
@@ -52,7 +61,8 @@ public class OcrDemoService {
 
   public OcrDemoResponse recognize(String filename, String contentType, byte[] fileBytes, String modelId) throws IOException {
     List<RenderedOcrPage> pages = pageRenderer.render(filename, contentType, fileBytes);
-    return recognizeRendered(normalizeFilename(filename), pages, ExtractionProgressListener.NOOP, modelId);
+    DocumentTemplate template = templateDetectionService.detect(filename, contentType, fileBytes, pages);
+    return recognizeRendered(normalizeFilename(filename), pages, ExtractionProgressListener.NOOP, modelId, template);
   }
 
   public OcrDemoResponse recognizeRendered(
@@ -69,44 +79,62 @@ public class OcrDemoService {
       ExtractionProgressListener progressListener,
       String modelId
   ) throws IOException {
+    DocumentTemplate template = templateDetectionService.detect(filename, "", null, pages);
+    return recognizeRendered(filename, pages, progressListener, modelId, template);
+  }
+
+  public OcrDemoResponse recognizeRendered(
+      String filename,
+      List<RenderedOcrPage> pages,
+      ExtractionProgressListener progressListener,
+      String modelId,
+      DocumentTemplate template
+  ) throws IOException {
     String normalizedFilename = normalizeFilename(filename);
+    List<RenderedOcrPage> safePages = pages == null ? List.of() : pages;
+    DocumentTemplate resolvedTemplate = template == null
+        ? templateDetectionService.detect(normalizedFilename, "", null, safePages)
+        : template;
     LlmModelProfile modelProfile = llmModelRegistry.resolve(modelId);
     ExtractionProgressListener listener = progressListener == null ? ExtractionProgressListener.NOOP : progressListener;
-    StructuredExtractionResult extraction = structuredExtractionGateway.extract(normalizedFilename, pages, listener, modelProfile);
-    listener.postProcessingStep("address_crop_review", "整页识别完成，正在复核地址字段。", 72);
+    StructuredExtractionResult extraction = structuredExtractionGateway.extract(normalizedFilename, safePages, listener, modelProfile);
+    listener.postProcessingStep("address_crop_review", "Reviewing address fields.", 72);
     AddressFieldCropRefinementResult refinedExtraction = addressFieldCropRefinementService.refine(
         normalizedFilename,
         extraction.data(),
-        pages,
+        safePages,
         modelProfile
     );
-    listener.postProcessingStep("field_crop_review", "正在复核普通字段和符号敏感字段。", 80);
+    listener.postProcessingStep("field_crop_review", "Reviewing ordinary and symbol-sensitive fields.", 80);
     GeneralFieldCropRefinementResult refinedGeneralFields = generalFieldCropRefinementService.refine(
         normalizedFilename,
         refinedExtraction.data(),
-        pages,
+        safePages,
         modelProfile
     );
-    listener.postProcessingStep("selection_crop_review", "正在复核勾选项和声明字段。", 88);
+    listener.postProcessingStep("selection_crop_review", "Reviewing checkbox and declaration fields.", 88);
     SelectionFieldCropRefinementResult refinedSelections = selectionFieldCropRefinementService.refine(
         normalizedFilename,
         refinedGeneralFields.data(),
-        pages,
-        modelProfile
+        safePages,
+        modelProfile,
+        resolvedTemplate
     );
-    listener.postProcessingStep("declaration_footer_review", "正在补充声明页日期和签名字段。", 92);
+    listener.postProcessingStep("declaration_footer_review", "Restoring declaration footer fields.", 92);
     DeclarationFooterFieldRefinementResult refinedFooterFields = declarationFooterFieldRefinementService.refine(
         normalizedFilename,
         refinedSelections.data(),
-        pages,
+        safePages,
         modelProfile
     );
-    listener.postProcessingStep("smudge_filter", "正在过滤涂抹、擦除和修正痕迹。", 96);
+    listener.postProcessingStep("smudge_filter", "Filtering smudges, erasures, and correction marks.", 96);
     SmudgedFieldValueFilterResult filteredExtraction = smudgedFieldValueFilterService.filter(refinedFooterFields.data());
-    listener.postProcessingStep("field_evidence", "正在生成字段快照和展示结果。", 98);
+    listener.postProcessingStep("field_evidence", "Building field snapshots and display results.", 98);
+    JsonNode finalStructuredData = withTemplateMetadata(filteredExtraction.data(), resolvedTemplate);
+    templateClassificationLogService.record(normalizedFilename, resolvedTemplate);
     Map<Integer, List<StructuredFieldDetail>> fieldDetailsByPage =
-        structuredFieldEvidenceService.buildFieldDetails(filteredExtraction.data(), pages);
-    List<OcrPage> responsePages = pages.stream()
+        structuredFieldEvidenceService.buildFieldDetails(finalStructuredData, safePages);
+    List<OcrPage> responsePages = safePages.stream()
         .map(page -> new OcrPage(
             page.page(),
             page.sourceImageDataUrl(),
@@ -125,6 +153,7 @@ public class OcrDemoService {
         List.of(
             "Rendered " + responsePages.size() + " page snapshot(s) and extracted structured JSON with " + modelProfile.label() + ".",
             "Rendered page snapshots were sent directly to the multimodal LLM to find fields and filled regions; no preset field list or manual template coordinate boxes were used.",
+            "Detected document template: " + resolvedTemplate.templateId() + " (" + resolvedTemplate.matchSource() + ").",
             "Address fields with clear value regions are second-pass transcribed from their field crop; updated fields: " + refinedExtraction.updated() + " / " + refinedExtraction.attempted() + ".",
             "Ordinary text and symbol-sensitive fields with clear value regions are crop-reviewed by field type; updated fields: " + refinedGeneralFields.updated() + " / " + refinedGeneralFields.attempted() + ".",
             "Checkbox and declaration fields with clear value regions are second-pass reviewed from their field crop; updated fields: " + refinedSelections.updated() + " / " + refinedSelections.attempted() + ".",
@@ -139,9 +168,23 @@ public class OcrDemoService {
         responsePages,
         List.of(),
         status,
-        filteredExtraction.data(),
+        finalStructuredData,
         extraction.rawText()
     );
+  }
+
+  private JsonNode withTemplateMetadata(JsonNode data, DocumentTemplate template) {
+    ObjectNode root = data != null && data.isObject()
+        ? data.deepCopy()
+        : JsonNodeFactory.instance.objectNode();
+    ObjectNode metadata = root.putObject("_template");
+    metadata.put("template_id", template.templateId());
+    metadata.put("footer_id", template.footerId());
+    metadata.put("page_count", template.pageCount());
+    metadata.put("confidence", template.confidence());
+    metadata.put("match_source", template.matchSource());
+    metadata.put("structure_hash", template.structureHash());
+    return root;
   }
 
   String normalizeFilename(String filename) {
