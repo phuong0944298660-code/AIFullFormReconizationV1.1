@@ -1,0 +1,467 @@
+const LOC_TOKEN = /<LOC_\d+>/g
+const REPLACEMENT_CHAR = /\uFFFD/g
+const APPLICANT_COUNT_PATTERN = /([0-9０-９]+)\s*(?:名|家|个|個|人)?\s*(?:成人|成年人|小孩|小童|兒童|儿童|将出生的婴儿|將出生的嬰兒|嬰兒|婴儿|家庭成员|家庭成員|需要經常照料|需要经常照料|雇工|僱工|傭工|佣工)/
+
+export function lineText(line) {
+  return (line?.spans || [])
+    .map((span) => span.text || '')
+    .join('')
+    .replace(LOC_TOKEN, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+export function visibleOcrLines(lines = []) {
+  return lines
+    .filter((line) => {
+      const text = lineText(line)
+      if (!text) return false
+      if (hasHeavyLocatorNoise(line)) return false
+      if (hasHeavyReplacementNoise(text)) return false
+      return true
+    })
+    .map((line) => ({
+      ...line,
+      spans: cleanSpans(line.spans || [])
+    }))
+}
+
+export function visibleOcrPages(pages = []) {
+  return pages.map((page) => {
+    const lines = page.lines || []
+    const visibleLines = visibleOcrLines(lines)
+    return {
+      ...page,
+      visibleLines,
+      filteredLineCount: Math.max(0, lines.length - visibleLines.length),
+      highlightedLineCount: visibleLines.filter((line) => line.hasUserInput).length
+    }
+  })
+}
+
+export function structuredJsonPreview(response) {
+  const data = response?.structuredData ?? {}
+  return JSON.stringify(data, null, 2)
+}
+
+export function responseJsonPreview(response) {
+  if (!response) return ''
+  const pages = Array.isArray(response.pages) ? response.pages : []
+  const normalized = {
+    ...response,
+    pages
+  }
+  const compact = compactPreviewValue(normalized)
+  return JSON.stringify(compact, null, 2)
+}
+
+export function pageStructuredFieldCount(response, pageNumber) {
+  return structuredFieldRows(response, pageNumber).length
+}
+
+export function structuredFieldRows(response, pageNumber) {
+  const evidenceRows = pageStructuredFields(response, pageNumber)
+  const pageData = response?.structuredData?.[`page_${pageNumber}`]
+  const confidenceData = confidencePageData(response, pageNumber)
+  const fallbackRows = []
+  collectFieldRows(pageData, [], fallbackRows, confidenceData)
+  const visibleFallbackRows = fallbackRows.filter(isVisibleFieldRow)
+  if (!evidenceRows.length) return sortStructuredRows(visibleFallbackRows)
+  const visibleEvidenceRows = evidenceRows.map(toEvidenceFieldRow).filter(isVisibleFieldRow)
+  if (!visibleFallbackRows.length) return sortStructuredRows(visibleEvidenceRows)
+  const evidenceByPath = new Map(visibleEvidenceRows.map((row) => [row.path, row]))
+  const mergedRows = visibleFallbackRows.map((row) => evidenceByPath.get(row.path) || row)
+  for (const row of visibleEvidenceRows) {
+    if (!visibleFallbackRows.some((fallbackRow) => fallbackRow.path === row.path)) {
+      mergedRows.push(row)
+    }
+  }
+  return sortStructuredRows(mergedRows)
+}
+
+function sortStructuredRows(rows = []) {
+  const indexed = rows.map((row, index) => ({ row, index }))
+  const footerRows = indexed.filter(({ row }) => isFooterFieldRow(row))
+  const workingRows = indexed.filter(({ row }) => isWorkingExperienceRow(row))
+  if (footerRows.length && workingRows.length) {
+    return [
+      ...indexed.filter(({ row }) => !isFooterFieldRow(row)).map(({ row }) => row),
+      ...footerRows
+        .sort((left, right) => visualBboxSortKey(left.row, left.index) - visualBboxSortKey(right.row, right.index))
+        .map(({ row }) => row)
+    ]
+  }
+  if (indexed.length >= 2 && indexed.every(({ row }) => hasUsableBbox(row))) {
+    return indexed
+      .sort((left, right) => visualBboxSortKey(left.row, left.index) - visualBboxSortKey(right.row, right.index))
+      .map(({ row }) => row)
+  }
+  return rows
+}
+
+function visualBboxSortKey(row, index) {
+  if (!hasUsableBbox(row)) return Number.MAX_SAFE_INTEGER - index
+  const bbox = row.bbox.map((value) => Number(value))
+  const maxCoord = Math.max(...bbox.map((value) => Math.abs(value)))
+  const rowBandSize = maxCoord <= 1 ? 0.02 : maxCoord < 500 ? 1 : 80
+  const rowBand = Math.round(bbox[1] / rowBandSize)
+  return rowBand * 100000 + bbox[0]
+}
+
+function hasUsableBbox(row) {
+  return Array.isArray(row?.bbox)
+    && row.bbox.length === 4
+    && row.bbox.every((value) => Number.isFinite(Number(value)))
+    && Number(row.bbox[2]) > Number(row.bbox[0])
+    && Number(row.bbox[3]) > Number(row.bbox[1])
+}
+
+function isWorkingExperienceRow(row) {
+  const text = `${row?.path || ''} ${row?.section || ''} ${row?.fieldName || ''}`.toLowerCase()
+  return text.includes('working_experience') || text.includes('working experience')
+}
+
+function isFooterFieldRow(row) {
+  const path = String(row?.path || '').toLowerCase()
+  const label = String(row?.fieldName || '').toLowerCase()
+  return path === 'date'
+    || path === 'signature_of_applicant'
+    || path.endsWith('.signature_of_applicant')
+    || label === 'date'
+    || label === 'signature of applicant'
+}
+
+export function fieldIssueRegions(response, pageNumber) {
+  return structuredFieldRows(response, pageNumber)
+    .flatMap((row) => row.charSegments || [])
+    .filter((segment) => segment.reviewFlag && Array.isArray(segment.bbox) && segment.bbox.length === 4)
+    .map((segment) => ({
+      id: `${segment.fieldPath}:${segment.index}`,
+      bbox: segment.bbox,
+      status: segment.status,
+      text: segment.text,
+      confidence: segment.confidence
+    }))
+}
+
+export function pageFieldConclusion(rows = []) {
+  const total = rows.length
+  if (!total) return '本页暂未识别到字段。'
+  const high = rows.filter((row) => row.confidence >= 85).length
+  const medium = rows.filter((row) => row.confidence >= 70 && row.confidence < 85).length
+  const low = rows.filter((row) => row.confidence < 70).length
+  const advice = low > 0
+    ? '建议优先复核低置信字段。'
+    : medium > 0
+      ? '建议抽查中等置信字段。'
+      : '整体可信度较高，可按需抽查。'
+  return `本页共识别 ${total} 个字段，其中 ${high} 个置信率在 85% 以上，${medium} 个在 70%-84% 之间，${low} 个低于 70%，${advice}`
+}
+
+export function documentFieldConclusion(response) {
+  const rows = documentFieldRows(response)
+  const total = rows.length
+  if (!total) return '整份文件暂未识别到字段。'
+  const high = rows.filter((row) => row.confidence >= 85).length
+  const medium = rows.filter((row) => row.confidence >= 70 && row.confidence < 85).length
+  const low = rows.filter((row) => row.confidence < 70).length
+  const advice = low > 0
+    ? '建议优先复核低置信字段。'
+    : medium > 0
+      ? '建议抽查中等置信字段。'
+      : '整体可信度较高，可按需抽查。'
+  return `整份文件共识别 ${total} 个字段，其中 ${high} 个置信率在 85% 以上，${medium} 个在 70%-84% 之间，${low} 个低于 70%；${advice}`
+}
+
+export function cropPlaceholderText() {
+  return '无区域快照'
+}
+
+function documentFieldRows(response) {
+  const pages = response?.pages || []
+  if (pages.length) {
+    return pages.flatMap((page) => structuredFieldRows(response, page.page))
+  }
+  const structuredData = response?.structuredData || {}
+  return Object.keys(structuredData)
+    .map((key) => key.match(/^page_(\d+)$/)?.[1])
+    .filter(Boolean)
+    .map(Number)
+    .sort((left, right) => left - right)
+    .flatMap((pageNumber) => structuredFieldRows(response, pageNumber))
+}
+
+function cleanSpans(spans) {
+  return spans
+    .map((span) => ({
+      ...span,
+      text: String(span.text || '')
+        .replace(LOC_TOKEN, '')
+        .replace(/\s+/g, ' ')
+    }))
+    .filter((span) => span.text.trim())
+}
+
+function hasHeavyLocatorNoise(line) {
+  const raw = (line?.spans || []).map((span) => span.text || '').join('')
+  return (raw.match(LOC_TOKEN) || []).length >= 2
+}
+
+function hasHeavyReplacementNoise(text) {
+  const count = (text.match(REPLACEMENT_CHAR) || []).length
+  return count >= 2 || count / Math.max(1, text.length) > 0.04
+}
+
+function summarizeDataUrl(value) {
+  if (!value) return ''
+  if (String(value).startsWith('data:')) return `${String(value).slice(0, 56)}...`
+  return value
+}
+
+function compactPreviewValue(value) {
+  if (typeof value === 'string') return compactPreviewString(value)
+  if (Array.isArray(value)) return value.map(compactPreviewValue)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, compactPreviewValue(item)])
+    )
+  }
+  return value
+}
+
+function compactPreviewString(value) {
+  if (value.startsWith('data:')) return summarizeDataUrl(value)
+  const maxLength = 20000
+  if (value.length > maxLength) {
+    return `${value.slice(0, maxLength)}... [truncated ${value.length - maxLength} chars]`
+  }
+  return value
+}
+
+function countLeafFields(value) {
+  if (value === null || value === undefined) {
+    return 0
+  }
+  if (typeof value === 'string' && value.trim() === '') {
+    return 0
+  }
+  if (Array.isArray(value)) {
+    return value.reduce((total, item) => total + countLeafFields(item), 0)
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value)
+      .filter(([key]) => !isControlField(key))
+      .reduce((total, [, item]) => total + countLeafFields(item), 0)
+  }
+  return 1
+}
+
+function collectFieldRows(value, path, rows, confidenceData) {
+  if (value === undefined) return
+  if (!hasApplicantRawValue(value)) return
+  if (isMetadataObject(value)) {
+    const valueNode = Object.hasOwn(value, 'value') ? value.value : value.text
+    if (!hasApplicantRawValue(valueNode)) return
+    rows.push(toFieldRow(path, valueNode, value.confidence ?? lookupConfidence(confidenceData, path)))
+    return
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      collectFieldRows(item, [...path, String(index + 1)], rows, confidenceData)
+    })
+    return
+  }
+  if (value !== null && typeof value === 'object') {
+    Object.entries(value).forEach(([key, child]) => {
+      if (key.startsWith('_') || isControlField(key)) return
+      collectFieldRows(child, [...path, key], rows, confidenceData)
+    })
+    return
+  }
+  rows.push(toFieldRow(path, value, lookupConfidence(confidenceData, path)))
+}
+
+function isVisibleFieldRow(row) {
+  return hasApplicantRawValue(row?.rawValue)
+}
+
+function hasApplicantRawValue(value) {
+  if (value === null || value === undefined) return false
+  if (typeof value === 'string') return value.trim() !== ''
+  return true
+}
+
+function isControlField(key) {
+  return String(key || '').toLowerCase().replace(/[_\s-]+/g, '') === 'noapplicantinput'
+}
+
+function isMetadataObject(value) {
+  return value
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && (Object.hasOwn(value, 'value') || Object.hasOwn(value, 'text'))
+    && (Object.hasOwn(value, 'confidence') || Object.keys(value).length <= 3)
+}
+
+function toFieldRow(path, rawValue, explicitConfidence) {
+  const baseDisplayValue = displayFieldValue(path, rawValue)
+  const displayValue = applicantCountDisplayValue(path, '', rawValue, baseDisplayValue) || baseDisplayValue
+  return {
+    id: path.join('.'),
+    section: humanizePath(path.slice(0, -1)),
+    fieldName: humanizeKey(path.at(-1) || 'field'),
+    path: path.join('.'),
+    rawValue,
+    displayValue,
+    confidence: normalizeConfidence(explicitConfidence, path, rawValue),
+    bbox: [],
+    snapshotDataUrl: '',
+    ocrText: '',
+    ocrStatus: 'not_run',
+    charSegments: charSegmentsFromText(displayValue, [])
+  }
+}
+
+function toEvidenceFieldRow(field) {
+  const path = String(field.path || 'field')
+  const pathParts = path.split('.').filter(Boolean)
+  const baseDisplayValue = field.displayValue ?? displayFieldValue(pathParts, field.value)
+  const displayValue = applicantCountDisplayValue(pathParts, field.label || '', field.value, baseDisplayValue) || baseDisplayValue
+  const characters = displayValue === baseDisplayValue ? field.characters || [] : []
+  return {
+    id: `${field.page || ''}:${path}`,
+    section: humanizePath(pathParts.slice(0, -1)),
+    fieldName: field.label || humanizeKey(pathParts.at(-1) || 'field'),
+    path,
+    rawValue: field.value,
+    displayValue,
+    confidence: normalizeConfidence(field.confidence, pathParts, field.value),
+    bbox: field.bbox || [],
+    snapshotDataUrl: field.snapshotDataUrl || '',
+    ocrText: '',
+    ocrStatus: 'not_run',
+    ocrConfidence: 0,
+    charSegments: charSegmentsFromText(displayValue, characters, path)
+  }
+}
+
+function displayFieldValue(path, value) {
+  if (value === null || value === undefined || value === '') return '未填写'
+  if (typeof value === 'boolean') return isStandaloneCheckboxState(path) ? (value ? '已勾选' : '未勾选') : (value ? '有' : '没有')
+  if (isSignaturePath(path) && String(value).trim().toLowerCase() === 'present') {
+    return '已签名，未识别出签名文字'
+  }
+  if (isSignaturePath(path) && String(value).trim().toLowerCase() === 'illegible_signature') {
+    return '签名文字无法辨认'
+  }
+  return String(value)
+}
+
+function applicantCountDisplayValue(path, label, rawValue, displayValue) {
+  if (!isBinaryLike(rawValue) && !isBinaryLike(displayValue)) return ''
+  const candidates = [
+    label,
+    path.at(-1),
+    path.join(' ')
+  ].filter(Boolean)
+  for (const candidate of candidates) {
+    const match = normalizeDigits(String(candidate)).match(APPLICANT_COUNT_PATTERN)
+    if (match) return match[1]
+  }
+  return ''
+}
+
+function isBinaryLike(value) {
+  if (value === 0 || value === 1) return true
+  if (typeof value === 'string') {
+    const normalized = value.trim()
+    return normalized === '0' || normalized === '1'
+  }
+  return false
+}
+
+function normalizeDigits(value) {
+  return String(value || '').replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xFF10 + 48))
+}
+
+function normalizeConfidence(value, path, rawValue) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.min(100, value <= 1 ? Math.round(value * 100) : Math.round(value)))
+  }
+  if (rawValue === null || rawValue === undefined || rawValue === '') return 70
+  if (isSignaturePath(path) && String(rawValue).trim().toLowerCase() === 'present') return 55
+  return 82
+}
+
+function humanizePath(path) {
+  return path.map(humanizeKey).filter(Boolean).join(' / ')
+}
+
+function humanizeKey(key) {
+  return String(key || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function isSignaturePath(path) {
+  return path.some((part) => /signature|签名|簽名/i.test(String(part)))
+}
+
+function isStandaloneCheckboxState(path) {
+  const text = path.map((part) => String(part || '')).join(' ').toLowerCase()
+  return /checked|checkbox|selected|is selected|勾选|已选/.test(text)
+}
+
+function confidencePageData(response, pageNumber) {
+  const data = response?.structuredData || {}
+  const pageKey = `page_${pageNumber}`
+  return data._confidence?.[pageKey]
+    || data._field_confidence?.[pageKey]
+    || data.field_confidence?.[pageKey]
+    || data[pageKey]?._confidence
+    || {}
+}
+
+function pageStructuredFields(response, pageNumber) {
+  const page = (response?.pages || []).find((item) => item.page === pageNumber)
+  return Array.isArray(page?.structuredFields) ? page.structuredFields : []
+}
+
+function charSegmentsFromText(displayValue, characters = [], fieldPath = '') {
+  if (characters.length) {
+    return characters.map((character, fallbackIndex) => {
+      const status = character.status || 'ok'
+      return {
+        index: character.index ?? fallbackIndex,
+        text: character.text ?? '',
+        confidence: normalizeConfidence(character.confidence, [], ''),
+        status,
+        bbox: character.bbox || [],
+        ocrText: '',
+        fieldPath,
+        reviewFlag: status !== 'ok'
+      }
+    })
+  }
+  return String(displayValue || '').split('').map((text, index) => ({
+    index,
+    text,
+    confidence: 100,
+    status: 'ok',
+    bbox: [],
+    ocrText: '',
+    fieldPath,
+    reviewFlag: false
+  }))
+}
+
+function lookupConfidence(confidenceData, path) {
+  let current = confidenceData
+  for (const part of path) {
+    if (current === null || current === undefined) return undefined
+    current = current[part]
+  }
+  return current
+}

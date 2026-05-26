@@ -1,0 +1,173 @@
+{
+  "entries" : [ {
+    "filename" : "陈丽萍-407.pdf",
+    "templateId" : "id407_2016_11",
+    "footerId" : "ID 407 (11/2016)",
+    "pageCount" : 4,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 90,
+    "structureHash" : "d293e05326f3eb82",
+    "firstSeenAt" : "2026-05-25 15:14:07",
+    "lastSeenAt" : "2026-05-25 15:50:27"
+  }, {
+    "filename" : "陈丽萍-A.pdf",
+    "templateId" : "id988a_2024_06",
+    "footerId" : "ID 988A (06/2024)",
+    "pageCount" : 5,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 92,
+    "structureHash" : "1480f3a692fa70aa",
+    "firstSeenAt" : "2026-05-25 15:14:18",
+    "lastSeenAt" : "2026-05-25 20:13:07"
+  }, {
+    "filename" : "陈丽萍-B.pdf",
+    "templateId" : "id988b_2024_06",
+    "footerId" : "ID 988B (06/2024)",
+    "pageCount" : 4,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 90,
+    "structureHash" : "7ef0dd11322fea72",
+    "firstSeenAt" : "2026-05-25 15:14:28",
+    "lastSeenAt" : "2026-05-25 15:14:28"
+  }, {
+    "filename" : "陈志萍-B.pdf",
+    "templateId" : "id988b_2024_06",
+    "footerId" : "ID 988B (06/2024)",
+    "pageCount" : 4,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 90,
+    "structureHash" : "b549ae634026313f",
+    "firstSeenAt" : "2026-05-25 15:14:37",
+    "lastSeenAt" : "2026-05-25 15:14:37"
+  }, {
+    "filename" : "何嘉萱-A测试.pdf",
+    "templateId" : "id988a_2024_06",
+    "footerId" : "ID 988A (06/2024)",
+    "pageCount" : 5,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 92,
+    "structureHash" : "8e5301a366932ae3",
+    "firstSeenAt" : "2026-05-25 15:14:49",
+    "lastSeenAt" : "2026-05-25 15:14:49"
+  }, {
+    "filename" : "何嘉萱-B.pdf",
+    "templateId" : "id988b_2024_06",
+    "footerId" : "ID 988B (06/2024)",
+    "pageCount" : 3,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 90,
+    "structureHash" : "b99a47ba94256a13",
+    "firstSeenAt" : "2026-05-25 15:14:56",
+    "lastSeenAt" : "2026-05-25 15:14:56"
+  }, {
+    "filename" : "黄晓兰A(P1申请类别双勾选).pdf",
+    "templateId" : "id988a_2024_06",
+    "footerId" : "ID 988A (06/2024)",
+    "pageCount" : 5,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 92,
+    "structureHash" : "f31e1be85356539f",
+    "firstSeenAt" : "2026-05-25 15:15:09",
+    "lastSeenAt" : "2026-05-25 20:09:32"
+  }, {
+    "filename" : "黄晓兰B.pdf",
+    "templateId" : "id988b_2024_06",
+    "footerId" : "ID 988B (06/2024)",
+    "pageCount" : 4,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 90,
+    "structureHash" : "c046373e70518fde",
+    "firstSeenAt" : "2026-05-25 15:15:18",
+    "lastSeenAt" : "2026-05-25 15:15:18"
+  }, {
+    "filename" : "李俊贤-407.pdf",
+    "templateId" : "id407_2016_11",
+    "footerId" : "ID 407 (11/2016)",
+    "pageCount" : 4,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 90,
+    "structureHash" : "f221ffaa3eca9571",
+    "firstSeenAt" : "2026-05-25 15:15:26",
+    "lastSeenAt" : "2026-05-25 15:15:26"
+  }, {
+    "filename" : "李俊贤-A.pdf",
+    "templateId" : "id988a_2024_06",
+    "footerId" : "ID 988A (06/2024)",
+    "pageCount" : 5,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 92,
+    "structureHash" : "c40ed22de3023ade",
+    "firstSeenAt" : "2026-05-25 15:15:36",
+    "lastSeenAt" : "2026-05-25 20:06:32"
+  }, {
+    "filename" : "李俊贤-B.pdf",
+    "templateId" : "id988b_2024_06",
+    "footerId" : "ID 988B (06/2024)",
+    "pageCount" : 4,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 90,
+    "structureHash" : "f942dce661447810",
+    "firstSeenAt" : "2026-05-25 15:15:44",
+    "lastSeenAt" : "2026-05-25 15:15:44"
+  }, {
+    "filename" : "梁静娴-A-V7.pdf",
+    "templateId" : "id988a_2024_06",
+    "footerId" : "ID 988A (06/2024)",
+    "pageCount" : 5,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 92,
+    "structureHash" : "391b96550b318251",
+    "firstSeenAt" : "2026-05-25 15:15:48",
+    "lastSeenAt" : "2026-05-25 15:15:48"
+  }, {
+    "filename" : "梁静娴-B-V7(P1转换雇工聘用).pdf",
+    "templateId" : "id988b_2024_06",
+    "footerId" : "ID 988B (06/2024)",
+    "pageCount" : 4,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 90,
+    "structureHash" : "4c107d7aa5160e15",
+    "firstSeenAt" : "2026-05-25 15:15:51",
+    "lastSeenAt" : "2026-05-25 15:15:51"
+  }, {
+    "filename" : "罗颖欣-A-V8.pdf",
+    "templateId" : "id988a_2024_06",
+    "footerId" : "ID 988A (06/2024)",
+    "pageCount" : 5,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 92,
+    "structureHash" : "15415f556aa2829d",
+    "firstSeenAt" : "2026-05-25 15:15:54",
+    "lastSeenAt" : "2026-05-25 15:15:54"
+  }, {
+    "filename" : "罗颖欣-B-V8.pdf",
+    "templateId" : "id988b_2024_06",
+    "footerId" : "ID 988B (06/2024)",
+    "pageCount" : 4,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 90,
+    "structureHash" : "f10a0424b9700428",
+    "firstSeenAt" : "2026-05-25 15:15:57",
+    "lastSeenAt" : "2026-05-25 15:15:57"
+  }, {
+    "filename" : "周咏诗-A-V6(较为潦草，暂不作人工判断准确率).pdf",
+    "templateId" : "id988a_2024_06",
+    "footerId" : "ID 988A (06/2024)",
+    "pageCount" : 5,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 92,
+    "structureHash" : "5775259a84367265",
+    "firstSeenAt" : "2026-05-25 15:16:01",
+    "lastSeenAt" : "2026-05-25 15:16:01"
+  }, {
+    "filename" : "周咏诗-B-V6.pdf",
+    "templateId" : "id988b_2024_06",
+    "footerId" : "ID 988B (06/2024)",
+    "pageCount" : 4,
+    "matchSource" : "visual_layout_footer",
+    "confidence" : 90,
+    "structureHash" : "a5b17035d8321f6c",
+    "firstSeenAt" : "2026-05-25 15:16:04",
+    "lastSeenAt" : "2026-05-25 15:16:04"
+  } ]
+}
